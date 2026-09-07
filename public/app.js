@@ -364,6 +364,7 @@ async function openDetail(id) {
       n.key_points = s.points && s.points.length ? s.points : n.key_points;
       n.bodyText = s.body || "";
       n.ocr = s.ocr || [];
+      n.subtitle = s.subtitle || "";
       n.comments = parseCommentsMd(s.commentsMd || "");
       n.remark = s.remark && s.remark !== "（空）" ? s.remark : "";
       if (d.fm) {
@@ -504,6 +505,8 @@ function normalSections(n) {
       <p style="margin-top:8px;color:var(--ink3);font-size:12px">完整正文与 ${Math.max(2, (n.ocr || []).length + 2)} 张图片已存入 attachments/，图片位置以 ![图N]() 内联于 Markdown 原文。</p></div>
     ${(n.ocr || []).length ? `<div class="sec"><div class="sec-head"><h4>🖼 图片文字识别</h4><span style="font-size:11px;color:var(--ink3)">视觉模型 OCR</span></div>
       <ul>${li(n.ocr)}</ul></div>` : ""}
+    ${n.subtitle ? `<div class="sec"><div class="sec-head"><h4>🎬 视频字幕</h4><span style="font-size:11px;color:var(--ink3)">平台自带字幕</span></div>
+      <p class="subtitle-text">${esc(n.subtitle)}</p></div>` : ""}
     ${(n.comments || []).length ? `<div class="sec"><div class="sec-head"><h4>💬 评论精选</h4></div>
       <div style="display:flex;flex-direction:column;gap:8px">${n.comments.map((c) => `
         <div class="comment-item"><span class="c-text">「${esc(c.text)}」</span>
@@ -758,7 +761,7 @@ async function openSettings() {
         </div></div>
       <div class="kv-row"><span class="k">评论抓取条数</span><span class="v"><span class="seg" id="segComment"><button data-v="10"${ccOn(10)}>10</button><button data-v="20"${ccOn(20)}>20</button><button data-v="50"${ccOn(50)}>50</button></span></span></div>
       <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code>X-Capture-Token: ${esc(cfg?.capture?.token || "")}</code><button class="link-btn" id="btnToken">重置</button></span></div>
-      <div class="kv-row"><span class="k">vault 路径</span><span class="v"><code>${esc(cfg?.vaultPath || "vault")}</code></span></div>
+      <div class="kv-row"><span class="k">vault 路径</span><span class="v"><input type="text" id="vaultPathInput" value="${esc(cfg?.vaultPath || "vault")}" style="width:100%;box-sizing:border-box" placeholder="vault"></span></div>
       <div class="kv-row"><span class="k">脚本安装</span><span class="v"><button class="link-btn" id="btnGuide">查看油猴脚本安装指引 →</button></span></div>
     </div>
     <div class="modal-foot"><button class="btn btn-ghost" data-close>取消</button><button class="btn btn-red" id="btnSaveSettings">保存设置</button></div>`;
@@ -787,7 +790,7 @@ async function openSettings() {
       openSettings();
     } catch (e) { toast(e.message || "重置失败", "err"); }
   };
-  $("#btnGuide").onclick = () => toast("安装指引：复制脚本 → Tampermonkey 新建 → 粘贴保存", "info");
+  $("#btnGuide").onclick = () => openUserscript();
   $("#btnSaveSettings").onclick = async () => {
     const val = (sel) => ($(sel)?.value ?? "").trim();
     const body = {
@@ -795,12 +798,67 @@ async function openSettings() {
         text: { baseUrl: val("[data-slot=text-base]"), apiKey: val("[data-slot=text-key]"), model: val("[data-slot=text-model]") },
         vision: { baseUrl: val("[data-slot=vision-base]"), apiKey: val("[data-slot=vision-key]"), model: val("[data-slot=vision-model]") }
       },
-      capture: { commentCount: Number($$("#segComment button.on")?.dataset.v || 20) }
+      capture: { commentCount: Number($$("#segComment button.on")?.dataset.v || 20) },
+      vaultPath: ($("#vaultPathInput")?.value ?? "").trim()
     };
     try {
-      await api("/settings", { method: "PUT", body });
-      closeModal(); toast("设置已保存到 data/config.json", "ok");
+      const r = await api("/settings", { method: "PUT", body });
+      closeModal();
+      toast(r.vaultChanged ? "vault 路径已切换并迁移，笔记库已更新" : "设置已保存到 data/config.json", "ok");
+      if (r.vaultChanged) { await loadAll(); renderSidebar(); if (App.view === "library") renderLibrary(); }
     } catch (e) { toast(e.message || "保存失败", "err"); }
+  };
+}
+
+/* ── 油猴脚本安装指引：弹窗展示全文 + 一键复制 + 下载 .user.js ── */
+async function openUserscript() {
+  $("#modalBox").innerHTML = `
+    <div class="modal-head"><h3>油猴脚本安装</h3><button class="close-x" data-close>×</button></div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--ink2);margin-bottom:10px">1. Chrome/Edge 装 Tampermonkey → 2. 新建用户脚本 → 3. 粘贴全文保存（或直接下载脚本拖入 Tampermonkey）。</div>
+      <div id="userscriptBox" style="font-size:12px;color:var(--ink3);text-align:center;padding:24px">加载脚本内容…</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close>取消</button>
+      <button class="btn btn-ghost" id="btnDownloadScript" disabled>下载脚本文件</button>
+      <button class="btn btn-red" id="btnCopyScript" disabled>复制脚本全文</button>
+    </div>`;
+  $("#overlayModal").hidden = false;
+
+  let script = null;
+  try {
+    const r = await api("/userscript");
+    script = r.content;
+    $("#userscriptBox").innerHTML = `<textarea readonly style="width:100%;height:320px;box-sizing:border-box;font:11px/1.5 'Consolas','Menlo',monospace;border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical">${esc(script)}</textarea>`;
+    $("#btnDownloadScript").disabled = false;
+    $("#btnCopyScript").disabled = false;
+  } catch (e) {
+    $("#userscriptBox").innerHTML = `<p style="color:var(--red)">脚本加载失败：${esc(e.message || "未知错误")}</p>`;
+  }
+
+  $("#btnCopyScript").onclick = async () => {
+    if (!script) return;
+    try {
+      await navigator.clipboard.writeText(script);
+      toast("脚本全文已复制到剪贴板", "ok");
+    } catch (_) {
+      // 剪贴板 API 受限（非 https/localhost）时降级 execCommand
+      const ta = $("#userscriptBox textarea");
+      ta.focus(); ta.select();
+      try { document.execCommand("copy"); toast("脚本全文已复制", "ok"); }
+      catch (_2) { toast("复制失败，请手动全选复制", "err"); }
+    }
+  };
+
+  $("#btnDownloadScript").onclick = () => {
+    if (!script) return;
+    const blob = new Blob([script], { type: "text/javascript;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "xhs_capture.user.js";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast("已下载 xhs_capture.user.js", "ok");
   };
 }
 

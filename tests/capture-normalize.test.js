@@ -51,6 +51,29 @@ test('视频笔记：type 与 video 字段', () => {
   assert.equal(raw.video.cover, 'https://c.jpg');
 });
 
+test('视频字幕：payload.subtitle {text,lang} → raw.subtitle_text/subtitle_lang', () => {
+  const { raw } = normalizeCapture({
+    note_id: 'n5',
+    note: { noteType: 'video', title: '跟练', desc: 'x' },
+    subtitle: { text: '今天讲减脂餐\n第一点控制碳水', lang: 'zh-CN' }
+  });
+  assert.equal(raw.subtitle_text, '今天讲减脂餐\n第一点控制碳水');
+  assert.equal(raw.subtitle_lang, 'zh-CN');
+});
+
+test('视频字幕容错：缺失/字符串/畸形均不抛错', () => {
+  // 无 subtitle 字段
+  let { raw } = normalizeCapture({ note_id: 'n6', note: { noteType: 'video', title: 't', desc: 'x' } });
+  assert.equal(raw.subtitle_text, '');
+  assert.equal(raw.subtitle_lang, '');
+  // subtitle 为纯字符串（兜底）
+  ({ raw } = normalizeCapture({ note_id: 'n7', note: { title: 't', desc: 'x' }, subtitle: '纯文本字幕' }));
+  assert.equal(raw.subtitle_text, '纯文本字幕');
+  // subtitle 为畸形对象（无 text）
+  ({ raw } = normalizeCapture({ note_id: 'n8', note: { title: 't', desc: 'x' }, subtitle: { foo: 1 } }));
+  assert.equal(raw.subtitle_text, '');
+});
+
 test('校验失败：缺 note_id / 空内容', () => {
   assert.throws(() => normalizeCapture({ note: { title: 'x' } }), (e) => e.code === 'MISSING_NOTE_ID');
   assert.throws(() => normalizeCapture({ note_id: 'n4', note: {} }), (e) => e.code === 'EMPTY_CONTENT');

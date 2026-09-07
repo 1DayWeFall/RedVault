@@ -7,8 +7,11 @@
  * POST /settings/test  → {slot} 发最小消息测连通
  */
 
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const crypto = require('crypto');
+const { migrateVault } = require('../services/vault');
 
 const SLOTS = ['text', 'vision'];
 
@@ -20,6 +23,18 @@ function maskKey(k) {
 
 module.exports = function settingsRoutes(ctx) {
   const router = express.Router();
+
+  /* 油猴脚本全文（设置页「脚本安装指引」复制/下载用） */
+  router.get('/userscript', (req, res, next) => {
+    try {
+      const file = path.join(__dirname, '..', '..', 'userscript', 'xhs_capture.user.js');
+      const content = fs.readFileSync(file, 'utf-8');
+      res.json({ name: 'xhs_capture.user.js', content });
+    } catch (e) {
+      if (e.code === 'ENOENT') throw { status: 404, code: 'NOT_FOUND', message: '脚本文件不存在' };
+      next(e);
+    }
+  });
 
   router.get('/settings', (req, res) => {
     const cfg = ctx.store.readConfig();
@@ -57,9 +72,34 @@ module.exports = function settingsRoutes(ctx) {
       if (body.capture?.resetToken === true) {
         cfg.capture.token = 'rv_' + crypto.randomBytes(12).toString('hex');
       }
-      if (body.vaultPath) cfg.vaultPath = String(body.vaultPath).trim();
+
+      /* vault 路径变更：校验 → 迁移 → 热切换 → 重建 index（改路径即时生效） */
+      let vaultChanged = false;
+      if (body.vaultPath !== undefined && body.vaultPath !== null) {
+        const newPath = String(body.vaultPath).trim();
+        if (newPath && newPath !== cfg.vaultPath) {
+          // 路径合法性：拒绝包含 .. 穿越（防路径注入）
+          if (newPath.includes('..')) {
+            throw { status: 400, code: 'BAD_VAULT_PATH', message: 'vault 路径不能包含 .. 穿越' };
+          }
+          const oldAbs = path.join(ctx.ROOT, cfg.vaultPath || 'vault');
+          const newAbs = path.resolve(ctx.ROOT, newPath);
+          migrateVault(oldAbs, newAbs);          // 迁移旧内容（失败抛错，不保存 config）
+          ctx.vault.setDir(newAbs);               // 热切换
+          cfg.vaultPath = newPath;
+          vaultChanged = true;
+        } else if (newPath) {
+          cfg.vaultPath = newPath;
+        }
+      }
+
       ctx.store.saveConfig(cfg);
-      res.json({ ok: true });
+      if (vaultChanged) {
+        // 迁移/切换后按新 vault 扫描重建 index，保证前端列表一致
+        const meta = ctx.vault.rebuildIndexMeta();
+        ctx.store.saveIndex({ notes: meta });
+      }
+      res.json({ ok: true, vaultChanged });
     } catch (e) { next(e); }
   });
 

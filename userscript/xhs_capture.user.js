@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         薯藏 RedVault · 小红书采集
 // @namespace    redvault
-// @version      0.2.0
-// @description  浏览小红书时自动捕获笔记内容与评论 → 上报本地 RedVault 收件箱（自用存档，零额外请求读页面数据）
+// @version      0.3.0
+// @description  浏览小红书时自动捕获笔记内容、视频字幕与评论 → 上报本地 RedVault 收件箱（自用存档，零额外请求读页面数据）
 // @author       1DayWeFall
 // @match        https://www.xiaohongshu.com/explore*
 // @match        https://www.xiaohongshu.com/discovery/item/*
@@ -13,6 +13,7 @@
 // @grant        GM_getValue
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      *.xhscdn.com
 // @noframes
 // ==/UserScript==
 
@@ -192,7 +193,83 @@
     }
     if (comments.length < commentTarget) truncated = true;
 
-    report(id, note, comments, truncated);
+    /* 视频字幕：优先取平台自带 SRT（借鉴 xhs-vault）。URL 带签名会过期，必须此刻下载；失败静默降级 */
+    let subtitle = null;
+    try { subtitle = await grabSubtitle(note); } catch (_) { /* 无字幕/下载失败 → 主数据照常 */ }
+
+    report(id, note, comments, truncated, subtitle);
+  }
+
+  /* ── 视频字幕：subtitles 挂在 media.video.subtitles（dict，按语言分组） ──
+     取值优先级 source > zh-CN > zh > en-US > en > 任意；下载 SRT 并解析为纯文本 */
+  function pickSubtitleUrl(video) {
+    const deep = [];
+    const walk = (v) => {
+      if (!v || typeof v !== 'object') return;
+      if (v.media) deep.push(v.media);
+      if (v.video) deep.push(v.video);
+      if (v.stream) { try { const s = typeof v.stream === 'string' ? JSON.parse(v.stream) : v.stream; if (s?.media) deep.push(s.media); if (s?.video) deep.push(s.video); } catch (_) {} }
+    };
+    walk(video);
+    for (const m of deep) {
+      for (const holder of [m?.video, m]) {
+        if (!holder || typeof holder !== 'object') continue;
+        const subs = holder.subtitles || holder.subtitle;
+        if (!subs) continue;
+        const by = {};
+        if (subs && !Array.isArray(subs)) {
+          for (const [lang, arr] of Object.entries(subs)) {
+            const list = Array.isArray(arr) ? arr : [arr];
+            const u = list[0]?.url || list[0]?.subtitleUrl;
+            if (u) by[lang] = u;
+          }
+        } else if (Array.isArray(subs)) {
+          for (const s of subs) if (s?.url) by[s.language || s.lang || '?'] = s.url;
+        }
+        for (const want of ['source', 'zh-CN', 'zh', 'en-US', 'en']) {
+          if (by[want]) return { url: by[want], lang: want };
+        }
+        const k = Object.keys(by)[0];
+        if (k) return { url: by[k], lang: k };
+      }
+    }
+    return null;
+  }
+
+  function parseSrt(srt) {
+    const lines = String(srt || '').replace(/\r/g, '').split('\n');
+    const out = [];
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;                                              // 空行
+      if (/^\d+$/.test(t)) continue;                                 // 序号
+      if (/^\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/.test(t)) continue; // 时间戳
+      const clean = t.replace(/<[^>]*>/g, '').replace(/\{[^}]*\}/g, '').trim(); // 去 HTML 标签 / 样式花括号
+      if (clean) out.push(clean);
+    }
+    // 相邻行合并（同一句被拆行）
+    return out.join('\n').replace(/\n+/g, '\n').trim();
+  }
+
+  async function grabSubtitle(note) {
+    const video = note.video;
+    if (!video) return null;
+    const picked = pickSubtitleUrl(video);
+    if (!picked) return null;
+    const srt = await new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: picked.url.replace(/^http:\/\//, 'https://'),
+        timeout: 12000,
+        onload: (r) => (r.status >= 200 && r.status < 300) ? resolve(r.responseText) : reject(new Error('HTTP ' + r.status)),
+        onerror: () => reject(new Error('网络错误')),
+        ontimeout: () => reject(new Error('超时'))
+      });
+    });
+    const text = parseSrt(srt);
+    if (!text) return null;
+    setStatus(`已提取视频字幕 ✓（${text.length} 字）`);
+    return { text, lang: picked.lang };
   }
 
   function collectFirstComments(note) {
@@ -249,8 +326,8 @@
   }
 
   /* ══════════════ 上报（GM_xmlhttpRequest 绕跨域；断线 60s 内重试 3 次） ══════════════ */
-  function report(id, note, comments, truncated) {
-    setStatus(`上报中…（${comments.length} 条评论${truncated ? ' · 未抓满' : ''}）`);
+  function report(id, note, comments, truncated, subtitle) {
+    setStatus(`上报中…（${comments.length} 条评论${truncated ? ' · 未抓满' : ''}${subtitle ? ' · 含字幕' : ''}）`);
     const payload = {
       note_id: id,
       source_url: location.origin + '/explore/' + id,
@@ -265,6 +342,7 @@
         imageList: note.imageList || [],
         video: note.video || null
       },
+      subtitle: subtitle || null,
       comments,
       comments_truncated: truncated
     };

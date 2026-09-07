@@ -18,6 +18,7 @@ function parseSections(content) {
     points: listFromMd(readSection(content, 'points')),
     body: readSection(content, 'body') || '',
     ocr: listFromMd(readSection(content, 'ocr')),
+    subtitle: readSection(content, 'subtitle') || '',
     commentsMd: readSection(content, 'comments') || '',
     relatedIds: rel,
     attachmentsMd: readSection(content, 'attachments') || '',

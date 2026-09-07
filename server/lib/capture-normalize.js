@@ -102,6 +102,15 @@ function normalizeCapture(payload) {
     : Array.isArray(note.comments) ? note.comments : [];
   const comments = commentsRaw.map(normalizeComment).filter(Boolean);
 
+  /* 视频字幕（§5.5 借鉴 xhs-vault）：payload.subtitle 为 { text, lang }，容错缺失/畸形 */
+  const sub = payload.subtitle || payload.subtitles || null;
+  const subtitleText = sub && typeof sub === 'object'
+    ? String(sub.text ?? sub.content ?? sub.srt ?? '').trim()
+    : (typeof sub === 'string' ? sub.trim() : '');
+  const subtitleLang = sub && typeof sub === 'object'
+    ? String(sub.lang ?? sub.language ?? '').trim()
+    : '';
+
   const raw = {
     type: isVideo ? 'video' : 'normal',
     title,
@@ -113,6 +122,8 @@ function normalizeCapture(payload) {
     cover_url: imageUrls[0] || firstString(note.cover, payload.cover_url),
     image_urls: imageUrls,
     video,
+    subtitle_text: subtitleText,
+    subtitle_lang: subtitleLang,
     tags,
     comments,
     comments_truncated: payload.comments_truncated === true,

@@ -19,6 +19,7 @@ const SECTIONS = {
   points:     '## 🔑 关键要点',
   body:       '## 📄 原帖正文',
   ocr:        '## 🖼 图片文字识别',
+  subtitle:   '## 🎬 视频字幕',
   comments:   '## 💬 评论精选',
   related:    '## 🔗 相关笔记',
   attachments:'## 📎 补充材料',
@@ -63,12 +64,13 @@ function buildFrontmatter(fm) {
 /** frontmatter 值中出现换行/特殊字符时的 yaml 安全性由 js-dump 保证；标题额外做文件名清洗 */
 
 /* ── 普通笔记渲染（§8） ── */
-function renderNoteMd({ fm, summary, points, body, ocr, comments, related, attachments, remark }) {
+function renderNoteMd({ fm, summary, points, body, ocr, subtitle, comments, related, attachments, remark }) {
   let md = buildFrontmatter(fm) + '\n\n';
   md += section('summary', summary || '（待 AI 整理）');
   md += section('points', (points || []).map((k) => `- ${k}`).join('\n') || '（待 AI 整理）');
   md += section('body', body || '（原帖正文缺失）');
   md += section('ocr', (ocr || []).map((o) => `- ${o}`).join('\n') || '（无）');
+  if (subtitle) md += section('subtitle', subtitle);
   md += section('comments', comments || '（无）');
   md += section('related', (related || []).map((r) => `- [[${r}]]`).join('\n') || '（暂无）');
   md += section('attachments', attachments || '（空）');
@@ -113,24 +115,35 @@ function readSection(md, key) {
   return md.slice(i + open.length, j).trim();
 }
 
-/* ── vault 服务（路径注入） ── */
+/* ── vault 服务（路径注入 + 运行时热切换） ── */
 function createVault(vaultDir) {
-  const attachDir = path.join(vaultDir, 'attachments');
+  let dir = path.resolve(vaultDir);
+  let attachDir = path.join(dir, 'attachments');
   fs.mkdirSync(attachDir, { recursive: true });
 
-  return {
-    dir: vaultDir,
-    attachDir,
+  const api = {
+    /** 运行时切换 vault 目录（设置页改路径用）：mkdirSync 新目录后切换闭包引用 */
+    setDir(newDir) {
+      const d = path.resolve(newDir);
+      const a = path.join(d, 'attachments');
+      fs.mkdirSync(a, { recursive: true });
+      dir = d;
+      attachDir = a;
+      return dir;
+    },
+
+    get dir() { return dir; },
+    get attachDir() { return attachDir; },
 
     /** 写入新笔记：返回实际文件名（已去重） */
     writeNoteFile(baseName, mdText) {
-      const file = uniqueFileName(vaultDir, baseName);
-      fs.writeFileSync(path.join(vaultDir, file), mdText, 'utf-8');
+      const file = uniqueFileName(dir, baseName);
+      fs.writeFileSync(path.join(dir, file), mdText, 'utf-8');
       return file;
     },
 
     readNoteFile(file) {
-      const full = path.join(vaultDir, file);
+      const full = path.join(dir, file);
       const raw = fs.readFileSync(full, 'utf-8');
       const parsed = matter(raw);
       return { fm: parsed.data, content: parsed.content, raw };
@@ -138,7 +151,7 @@ function createVault(vaultDir) {
 
     /** 编辑区块：只动目标锚点，modified_at 同步更新（§5.6） */
     updateNoteFile(file, fmPatch, sectionPatch) {
-      const full = path.join(vaultDir, file);
+      const full = path.join(dir, file);
       let md = fs.readFileSync(full, 'utf-8');
       const parsed = matter(md);
 
@@ -158,7 +171,7 @@ function createVault(vaultDir) {
     /** 以 vault 扫描重建 index（frontmatter 为准，§5.3） */
     rebuildIndexMeta() {
       const notes = [];
-      for (const f of fs.readdirSync(vaultDir)) {
+      for (const f of fs.readdirSync(dir)) {
         if (!f.endsWith('.md')) continue;
         try {
           const { fm } = this.readNoteFile(f);
@@ -185,7 +198,7 @@ function createVault(vaultDir) {
 
     /** 删除笔记 + 按 note_id 前缀清理其附件（命名规则 §5.5 保证归属） */
     deleteNoteFile(file, noteId) {
-      fs.unlinkSync(path.join(vaultDir, file));
+      fs.unlinkSync(path.join(dir, file));
       let cleaned = 0;
       for (const f of fs.readdirSync(attachDir)) {
         if (f.startsWith(noteId + '-')) {
@@ -195,10 +208,25 @@ function createVault(vaultDir) {
       return cleaned;
     }
   };
+  return api;
+}
+
+/** 迁移 vault：把旧目录下所有 .md 与 attachments/ 递归拷贝到新目录（已存在则覆盖同名） */
+function migrateVault(oldDir, newDir) {
+  const src = path.resolve(oldDir);
+  const dst = path.resolve(newDir);
+  if (src === dst) return { migrated: 0 };
+  fs.mkdirSync(dst, { recursive: true });
+  let migrated = 0;
+  if (fs.existsSync(src)) {
+    fs.cpSync(src, dst, { recursive: true, force: true });
+    migrated = fs.readdirSync(src).length;
+  }
+  return { migrated };
 }
 
 module.exports = {
-  SECTIONS, SYNTH_SECTIONS, createVault,
+  SECTIONS, SYNTH_SECTIONS, createVault, migrateVault,
   safeTitle, uniqueFileName, buildFrontmatter,
   renderNoteMd, renderSynthMd, replaceSection, readSection, wrap, section
 };

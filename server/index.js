@@ -35,7 +35,7 @@ const { createPipeline } = require('./services/pipeline');
 const { createAi } = require('./services/ai');
 const store = createStore(DATA_DIR);
 const vault = createVault(path.join(ROOT, store.readConfig().vaultPath || 'vault'));
-const ctx = { store, vault, sharpAvailable };
+const ctx = { store, vault, sharpAvailable, ROOT };
 ctx.ai = createAi(ctx);
 ctx.pipeline = createPipeline(ctx);
 

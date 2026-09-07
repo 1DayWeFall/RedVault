@@ -19,7 +19,9 @@ const STAGES = ['downloading_images', 'ai_processing', 'relating', 'writing'];
 const CATEGORIES = ['美食', '健康', '穿搭', '美妆', '家居', '旅行', '学习', '职场', '育儿', '科技', '理财', '运动', '其他'];
 
 /* ── Prompt（DESIGN §9 P1/P2） ── */
-const P1 = (title, desc, commentsTxt) => `你是小红书内容整理助手。这是同一篇帖子的若干张图片与文本信息，请一次性完成整理：
+const P1 = (title, desc, commentsTxt, subtitleTxt) => {
+  const subBlock = subtitleTxt ? `\n视频字幕：\n${subtitleTxt}\n` : '';
+  return `你是小红书内容整理助手。这是同一篇帖子的若干张图片与文本信息，请一次性完成整理：
 1) ocr：逐图提取图中所有可见文字（无字则空字符串，按图顺序）
 2) summary：≤200 字摘要
 3) key_points：3–6 条可执行要点
@@ -29,13 +31,18 @@ const P1 = (title, desc, commentsTxt) => `你是小红书内容整理助手。�
 7) comment_insights：高赞评论中的高价值补充（≤3 条，无则空数组）
 
 标题：${title}
-正文：${desc}
+正文：${desc}${subBlock}
 评论：${commentsTxt}
 
 严格输出 JSON：{"ocr":[],"summary":"","key_points":[],"category":"","subcategory":"","tags":[],"comment_insights":[]}`;
+};
 
-const P2 = (title, desc, commentsTxt, isVideo) => `你是小红书内容整理助手。请对这篇帖子（${isVideo ? '视频笔记，视频未转写，内容基于简介与评论' : '图文笔记'}）完成整理：
-1) summary：≤200 字摘要${isVideo ? '（末尾注明「视频未转写，内容基于简介与评论」）' : ''}
+const P2 = (title, desc, commentsTxt, subtitleTxt) => {
+  const kind = subtitleTxt ? '视频笔记（含平台字幕，可基于字幕整理）' : '视频笔记（无字幕，视频未转写，内容基于简介与评论）';
+  const note = subtitleTxt ? '' : '（末尾注明「视频未转写，内容基于简介与评论」）';
+  const subBlock = subtitleTxt ? `\n视频字幕：\n${subtitleTxt}\n` : '';
+  return `你是小红书内容整理助手。请对这篇帖子（${kind}）完成整理：
+1) summary：≤200 字摘要${note}
 2) key_points：3–6 条可执行要点
 3) category：一级分类（严格从这些中选：${CATEGORIES.join('/')}）
 4) subcategory：细分场景（自由短语 ≤6 字）
@@ -43,10 +50,11 @@ const P2 = (title, desc, commentsTxt, isVideo) => `你是小红书内容整理�
 6) comment_insights：高赞评论中的高价值补充（≤3 条，无则空数组）
 
 标题：${title}
-正文：${desc}
+正文：${desc}${subBlock}
 评论：${commentsTxt}
 
 严格输出 JSON：{"summary":"","key_points":[],"category":"","subcategory":"","tags":[],"comment_insights":[]}`;
+};
 
 /* sharp 可选加载（§12 缺失降级原图） */
 let sharp = null;
@@ -106,8 +114,8 @@ async function imageToBase64(abs) {
   return `data:${mime};base64,` + buf.toString('base64');
 }
 
-/** AI 结果归一化（容错：字段缺失/越界给默认值） */
-function normalizeAi(r, isVideo = false) {
+/** AI 结果归一化（容错：字段缺失/越界给默认值）。hasSubtitle 为真时不再标注「未转写」 */
+function normalizeAi(r, isVideo = false, hasSubtitle = false) {
   const out = {
     ocr: Array.isArray(r.ocr) ? r.ocr.map(String).filter(Boolean) : [],
     summary: String(r.summary || '').slice(0, 400),
@@ -117,7 +125,7 @@ function normalizeAi(r, isVideo = false) {
     tags: Array.isArray(r.tags) ? r.tags.map(String).filter(Boolean).slice(0, 6) : [],
     comment_insights: Array.isArray(r.comment_insights) ? r.comment_insights.map(String).filter(Boolean).slice(0, 3) : []
   };
-  if (isVideo && out.summary && !out.summary.includes('视频未转写')) {
+  if (isVideo && !hasSubtitle && out.summary && !out.summary.includes('视频未转写')) {
     out.summary += '（视频未转写，内容基于简介与评论）';
   }
   return out;
@@ -127,15 +135,16 @@ function normalizeAi(r, isVideo = false) {
 async function runAi(ctx, raw, imgs) {
   const commentsTxt = renderCommentsMd(raw.comments).slice(0, 3000);
   const isVideo = raw.type === 'video';
+  const subtitleTxt = String(raw.subtitle_text || '').slice(0, 4000);
 
   if (imgs.local.length) {
     const first = imgs.local.slice(0, 6);
     const images = await Promise.all(first.map((l) => imageToBase64(l.abs)));
     const content = [
-      { type: 'text', text: P1(raw.title, raw.desc, commentsTxt) },
+      { type: 'text', text: P1(raw.title, raw.desc, commentsTxt, subtitleTxt) },
       ...images.map((url) => ({ type: 'image_url', image_url: { url } }))
     ];
-    let result = normalizeAi(await ctx.ai.chatJson('vision', [{ role: 'user', content }], { maxTokens: 3000 }));
+    let result = normalizeAi(await ctx.ai.chatJson('vision', [{ role: 'user', content }], { maxTokens: 3000 }), isVideo, !!subtitleTxt);
     // 剩余批次仅补 OCR（每批 6 张）
     for (let i = 6; i < imgs.local.length; i += 6) {
       const batch = imgs.local.slice(i, i + 6);
@@ -151,8 +160,8 @@ async function runAi(ctx, raw, imgs) {
     }
     return result;
   }
-  const result = await ctx.ai.chatJson('text', [{ role: 'user', content: P2(raw.title, raw.desc, commentsTxt, isVideo) }], { maxTokens: 2000 });
-  return normalizeAi(result, isVideo);
+  const result = await ctx.ai.chatJson('text', [{ role: 'user', content: P2(raw.title, raw.desc, commentsTxt, subtitleTxt) }], { maxTokens: 2000 });
+  return normalizeAi(result, isVideo, !!subtitleTxt);
 }
 
 function createPipeline(ctx) {
@@ -233,6 +242,8 @@ function createPipeline(ctx) {
     if (ai?.comment_insights?.length) {
       commentsBlock.push('\n**AI 洞察**\n' + ai.comment_insights.map((c) => `- ${c}`).join('\n'));
     }
+    const subtitleText = String(raw.subtitle_text || '').trim();
+    const hasSubtitle = subtitleText.length > 0;
     const fm = {
       title: raw.title, url: raw.source_url, note_id: entry.note_id,
       author: raw.author, author_id: raw.author_id || '', type: raw.type,
@@ -244,6 +255,8 @@ function createPipeline(ctx) {
       cover: imgs.thumb || raw.cover_url || '',
       images: imgs.local.map((l) => l.file),
       ...(imgs.remote.length ? { images_remote: imgs.remote } : {}),
+      has_subtitle: hasSubtitle,
+      ...(hasSubtitle ? { subtitle_lang: raw.subtitle_lang || '' } : {}),
       related, sources: [], attachments: []
     };
     const md = renderNoteMd({
@@ -252,6 +265,7 @@ function createPipeline(ctx) {
       points: ai?.key_points || [],
       body: raw.desc || '（正文缺失）',
       ocr: ai?.ocr || [],
+      subtitle: hasSubtitle ? subtitleText : '',
       comments: commentsBlock.join('\n'),
       related, attachments: '', remark: ''
     });
