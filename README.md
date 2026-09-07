@@ -26,19 +26,25 @@
 
 ```
 RedVault/
-├── docs/
-│   └── DESIGN.md   # 设计文档（唯一事实源：架构 / 数据模型 / 风险边界）
-├── demo/           # 前端交互 demo（index.html + app.js + styles.css）
-├── sync.ps1        # 一键同步：git add → commit → push
-└── README.md       # 本文件
+├── server/                 # Node 服务（Express · 127.0.0.1:3789 · 仅回环监听）
+│   ├── index.js            # 入口：静态托管 / 统一错误处理 / 启动自检
+│   ├── routes/             # API 路由（capture / inbox / notes / …随里程碑挂载）
+│   ├── services/           # 数据层 / vault 引擎 / AI 管线 / …
+│   └── lib/                # capture 数据规范化等纯函数
+├── public/                 # 前端（由 demo 平移，无构建链）
+├── userscript/             # 油猴采集脚本 xhs_capture.user.js
+├── tests/                  # node:test 单测
+├── docs/DESIGN.md          # 设计文档（唯一事实源）
+├── vault/  data/           # 运行时数据（.gitignore，绝不入库）
+├── sync.ps1                # 一键同步：git add → commit → push
+└── README.md               # 本文件
 ```
 
-## Demo 快速开始
+## 本地运行
 
 ```powershell
-cd demo
-python -m http.server 8923        # 或 npx serve -l 8923
-# 浏览器打开 http://localhost:8923
+npm install
+npm start        # → http://127.0.0.1:3789
 ```
 
 内置 12 篇示例笔记（11 篇模拟抓取 + 1 篇 AI 合成），覆盖完整交互：

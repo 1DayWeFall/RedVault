@@ -32,3 +32,7 @@ tmp/
 
 # ===== 本地工具数据（不入库） =====
 .codebuddy/
+
+# ===== RedVault 运行时数据（含 apiKey 与用户笔记，绝不提交） =====
+data/
+vault/
