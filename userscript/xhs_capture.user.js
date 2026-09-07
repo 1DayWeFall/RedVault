@@ -154,17 +154,27 @@
   function extractNote(id) {
     const st = window.__INITIAL_STATE__;
     if (!st) return null;
-    const candidates = [
-      st.noteData?.noteDetailMap?.[id]?.note,
-      st.note?.noteDetailMap?.[id]?.note,
-      st.noteDetailMap?.[id]?.note,
-      st.note?.noteData?.noteDetailMap?.[id]?.note
-    ].filter(Boolean);
-    if (!candidates.length) return null;
-    // 合并多版本结构：取字段最全的
-    const note = {};
-    for (const c of candidates) Object.assign(note, c);
-    note.__firstComments = candidates.reduce((acc, c) => acc.concat(c.comments || c.firstComments || []), []);
+
+    /* 候选路径：优先按 id 精确取，兼容 noteData/note 两套历史结构 */
+    const getMap = () => {
+      const ndm = (st.note && st.note.noteDetailMap) || (st.noteData && st.noteData.noteDetailMap) || st.noteDetailMap;
+      return ndm;
+    };
+    const ndm = getMap();
+    let note = null;
+    if (ndm && ndm[id] && ndm[id].note) note = ndm[id].note;
+
+    /* 兜底（xhs-vault 经验）：noteDetailMap 的 key 偶尔不等于 note_id，遍历找第一个含 title/desc 的 note */
+    if (!note && ndm) {
+      for (const k in ndm) {
+        const v = ndm[k] && ndm[k].note;
+        if (v && (v.title || v.desc)) { note = v; break; }
+      }
+    }
+    if (!note) return null;
+
+    /* 首屏评论：note.comments 或 note.firstComments（供 collectFirstComments 用） */
+    note.__firstComments = note.comments || note.firstComments || [];
     return note;
   }
 
@@ -174,11 +184,16 @@
       // 本会话/历史已上报过：仍然问服务端（可能被删除过），但不再抓评论
     }
     setStatus('已进入详情页，提取页面数据…');
-    await sleep(600); // 等待 Vue 渲染填充 __INITIAL_STATE__
 
-    const note = extractNote(id);
+    /* 轮询等待 __INITIAL_STATE__ 填充（分享链接 ?xsec_token 需异步请求，最多等 10s） */
+    let note = null;
+    for (let i = 0; i < 20; i++) {
+      await sleep(500);
+      note = extractNote(id);
+      if (note && (note.title || note.desc)) break;
+    }
     if (!note || (!note.title && !note.desc)) {
-      setStatus('<span class="rv-err">未找到页面数据</span>（页面版本差异或未完全加载，可点重新抓取）');
+      setStatus('<span class="rv-err">未找到页面数据</span>（页面未加载或已改版，可点重新抓取）');
       return;
     }
     setTitle(note.title || (note.desc || '').slice(0, 30));
