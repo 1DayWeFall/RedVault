@@ -385,7 +385,7 @@ async function openDetail(id) {
 
   $("#drawerDetail").innerHTML = `
     <div class="drawer-topbar">
-      <span class="crumb">${isSyn ? "AI 合成笔记" : n.category + " / " + n.subcategory}</span>
+      <span class="crumb">${isSyn ? "AI 合成笔记" : esc(n.category) + " / " + esc(n.subcategory)}</span>
       <span class="spacer"></span>
       <button class="mini-btn" id="btnReprocess" title="重跑 AI 打标与排版">↺ 重新打标</button>
       <button class="mini-btn danger" id="btnDelNote">删除</button>

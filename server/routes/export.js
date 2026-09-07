@@ -20,6 +20,12 @@ module.exports = function exportRoutes(ctx) {
       const date = new Date().toISOString().slice(0, 10);
       res.attachment(`redvault-${date}.zip`);
       archive.pipe(res);
+
+      /* 内存生成 INDEX（wikilink 目录，不写入 vault） */
+      const notes = ctx.store.readIndex().notes;
+      const rows = notes.map((n) => `- [[${n.file.replace(/\.md$/, '')}|${n.title}]]`).join('\n');
+      archive.append(`# 薯藏 RedVault · 库目录\n\n> 共 ${notes.length} 篇 · 导出于 ${new Date().toLocaleDateString('zh-CN')}\n\n${rows}\n`, { name: 'INDEX.md' });
+
       archive.directory(ctx.vault.dir, false); // vault 根内容（含 attachments/）原样打包
       archive.finalize();
     } catch (e) { next(e); }
