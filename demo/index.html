@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>薯藏 RedVault · 小红书知识库</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ══════════ 顶栏 ══════════ -->
+<header class="topbar">
+  <div class="topbar-left">
+    <a class="logo" href="#/library">
+      <span class="logo-mark" aria-hidden="true">薯</span>
+      <span class="logo-text">薯藏<i>RedVault</i></span>
+    </a>
+    <span class="topbar-divider" aria-hidden="true"></span>
+    <nav class="topnav">
+      <a href="#/inbox" data-nav="inbox">收件箱<span class="nav-badge" id="inboxBadge" hidden>0</span></a>
+      <a href="#/library" data-nav="library">笔记库</a>
+    </nav>
+  </div>
+
+  <div class="topbar-search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+    <input id="searchInput" type="text" placeholder="搜索标题、摘要、标签…" autocomplete="off">
+    <kbd id="searchKbd">/</kbd>
+  </div>
+
+  <div class="topbar-right">
+    <div class="stat-chip" title="收件箱待处理">
+      <span class="stat-dot stat-dot--red"></span><b id="statInbox">0</b> 待处理
+    </div>
+    <div class="stat-chip" title="已入库笔记">
+      <span class="stat-dot stat-dot--ink"></span><b id="statNotes">0</b> 篇笔记
+    </div>
+    <button class="icon-btn" id="btnExport" title="导出 vault zip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    </button>
+    <button class="icon-btn" id="btnSettings" title="设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ══════════ 侧栏 ══════════ -->
+  <aside class="sidebar">
+    <div class="side-section">
+      <div class="side-title">分类</div>
+      <ul class="cat-tree" id="catTree"></ul>
+    </div>
+    <div class="side-section">
+      <div class="side-title">智能</div>
+      <ul class="side-list">
+        <li>
+          <button class="side-link" id="sideSynthesis">
+            <span class="side-ico ai-grad-text">✦</span> 合成笔记
+            <span class="side-count" id="synCount">0</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+    <div class="side-section">
+      <div class="side-title">标签</div>
+      <div class="tag-cloud" id="tagCloud"></div>
+    </div>
+    <div class="side-foot">
+      <div class="vault-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        vault/
+        <span class="vault-pill-live">本地同步中</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══════════ 内容区 ══════════ -->
+  <main class="content" id="content"><!-- 视图由 JS 渲染 --></main>
+</div>
+
+<!-- ══════════ 管线进度悬浮条 ══════════ -->
+<div class="pipeline-bar" id="pipelineBar" hidden>
+  <button class="pipeline-head" id="pipelineHead">
+    <span class="pipeline-spin" aria-hidden="true"></span>
+    <span class="pipeline-label" id="pipelineLabel">AI 处理中</span>
+    <span class="pipeline-count" id="pipelineCount">0/0</span>
+    <svg class="pipeline-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="pipeline-panel" id="pipelinePanel" hidden></div>
+</div>
+
+<!-- ══════════ 多选操作浮栏 ══════════ -->
+<div class="select-bar" id="selectBar" hidden>
+  <button class="ghost-btn" id="btnCancelSelect">取消</button>
+  <span class="select-bar-info">已选 <b id="selectCount">0</b> 篇</span>
+  <button class="ai-btn" id="btnOpenSynthesize">
+    <span class="ai-spark" aria-hidden="true">✦</span>
+    AI 合成主题笔记
+    <span class="select-bar-cost" id="selectCost">≈ ¥0.03</span>
+  </button>
+</div>
+
+<!-- ══════════ 弹窗层 ══════════ -->
+<div class="overlay" id="overlayDetail" hidden>
+  <div class="drawer-backdrop" data-close></div>
+  <aside class="drawer" id="drawerDetail" role="dialog" aria-modal="true" aria-label="笔记详情"></aside>
+</div>
+
+<div class="overlay" id="overlayModal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal" id="modalBox" role="dialog" aria-modal="true"></div>
+</div>
+
+<!-- ══════════ Toast ══════════ -->
+<div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
