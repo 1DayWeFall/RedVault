@@ -194,12 +194,8 @@
         ''
       );
 
-      /* 正文：在 [class*="desc"] / [class*="content"] / note-content 里找 */
-      const desc = (
-        textOf('#detail-desc, .desc, [class*="desc"]:not(style), [class*="note-content"]') ||
-        textOf('meta[name="og:description"]', 'content') ||
-        ''
-      );
+      /* 正文：优先取「正文全文」section 下的内容块，再 og:description，最后页面最长文本兜底 */
+      const desc = extractDesc();
 
       /* 作者 */
       const author =
@@ -243,6 +239,35 @@
       if (t && !tags.includes(t)) tags.push(t);
     });
     return tags.slice(0, 8).map((name) => ({ name }));
+  }
+
+  /* 提取笔记正文：避免抓到用户简介/签名等短文本 */
+  function extractDesc() {
+    /* 策略1：定位「正文全文」section 标题，取其下方/同级的正文块 */
+    const sections = document.querySelectorAll('[class*="section"], [class*="note-content"], #detail-desc');
+    for (const sec of sections) {
+      const t = (sec.textContent || '').trim();
+      // 「正文全文」标题所在块，其正文是块内最长的一段
+      if (t.includes('正文') && t.length > 40) {
+        // 去掉「正文全文」标题本身，取剩余最长文本
+        const parts = t.replace(/正文全文?/g, '').trim();
+        if (parts.length > 30) return parts.slice(0, 2000);
+      }
+    }
+
+    /* 策略2：og:description（标准 meta，几乎必有，且是笔记摘要而非用户签名） */
+    const og = textOf('meta[name="og:description"]', 'content');
+    if (og && og.length > 30) return og.slice(0, 2000);
+
+    /* 策略3：遍历所有 div，选文本最长且 > 50 的块（排除 body/main/侧边栏短签名） */
+    let best = '';
+    const skip = new Set(['body', 'main', 'html']);
+    document.querySelectorAll('div').forEach((div) => {
+      if (skip.has(div.tagName.toLowerCase())) return;
+      const t = (div.textContent || '').trim();
+      if (t.length > 50 && t.length > best.length) best = t;
+    });
+    return best.slice(0, 2000);
   }
 
   /* 取元素文本内容（按选择器找第一个有可见文本的） */
