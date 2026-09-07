@@ -732,45 +732,77 @@ function exitSelectMode() {
   if (App.view === "library") renderLibrary();
 }
 
-/* ── 设置 ── */
-function openSettings() {
+/* ── 设置（接真实 /api/settings） ── */
+async function openSettings() {
+  let cfg = null;
+  try { cfg = await api("/settings"); } catch (e) { toast(e.message || "读取设置失败", "err"); }
+  const t = cfg?.ai?.text || {}, v = cfg?.ai?.vision || {};
+  const commentCount = cfg?.capture?.commentCount || 20;
+  const ccOn = (n) => (n === commentCount ? ' class="on"' : '');
+
   $("#modalBox").innerHTML = `
     <div class="modal-head"><h3>设置</h3><button class="close-x" data-close>×</button></div>
     <div class="modal-body">
       <div class="slot-card"><div class="slot-head"><span class="tag">文本模型</span><span class="tag ok-tag" data-ok="text" hidden>连通 0ms</span>
         <button class="test-btn" data-test="text">测试连接</button></div>
         <div class="slot-grid">
-          <div class="field w2"><label>Base URL</label><input type="text" value="https://api.example.com/v1"></div>
-          <div class="field"><label>API Key</label><input type="text" value="sk-***abc"></div>
-          <div class="field"><label>模型</label><input type="text" value="gpt-4o-mini"></div>
+          <div class="field w2"><label>Base URL</label><input type="text" data-slot="text-base" value="${esc(t.baseUrl)}" placeholder="https://api.example.com/v1"></div>
+          <div class="field"><label>API Key</label><input type="text" data-slot="text-key" value="${esc(t.apiKey)}" placeholder="sk-..."></div>
+          <div class="field"><label>模型</label><input type="text" data-slot="text-model" value="${esc(t.model)}" placeholder="gpt-4o-mini"></div>
         </div></div>
       <div class="slot-card"><div class="slot-head"><span class="tag">视觉模型（兼任 OCR）</span><span class="tag ok-tag" data-ok="vision" hidden>连通 0ms</span>
         <button class="test-btn" data-test="vision">测试连接</button></div>
         <div class="slot-grid">
-          <div class="field w2"><label>Base URL</label><input type="text" value="https://open.bigmodel.cn/api/paas/v4"></div>
-          <div class="field"><label>API Key</label><input type="text" value="sk-***f2d"></div>
-          <div class="field"><label>模型</label><input type="text" value="glm-4v-plus"></div>
+          <div class="field w2"><label>Base URL</label><input type="text" data-slot="vision-base" value="${esc(v.baseUrl)}" placeholder="https://open.bigmodel.cn/api/paas/v4"></div>
+          <div class="field"><label>API Key</label><input type="text" data-slot="vision-key" value="${esc(v.apiKey)}" placeholder="sk-..."></div>
+          <div class="field"><label>模型</label><input type="text" data-slot="vision-model" value="${esc(v.model)}" placeholder="glm-4v-plus"></div>
         </div></div>
-      <div class="kv-row"><span class="k">评论抓取条数</span><span class="v"><span class="seg" id="segComment"><button data-v="10">10</button><button data-v="20" class="on">20</button><button data-v="50">50</button></span></span></div>
-      <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code>X-Capture-Token: rv_9f3k…e21</code><button class="link-btn" id="btnToken">重置</button></span></div>
-      <div class="kv-row"><span class="k">vault 路径</span><span class="v"><code>~/RedVault/vault</code><span style="font-size:11px;color:var(--ok)">✓ 存在 · 132 个文件</span></span></div>
+      <div class="kv-row"><span class="k">评论抓取条数</span><span class="v"><span class="seg" id="segComment"><button data-v="10"${ccOn(10)}>10</button><button data-v="20"${ccOn(20)}>20</button><button data-v="50"${ccOn(50)}>50</button></span></span></div>
+      <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code>X-Capture-Token: ${esc(cfg?.capture?.token || "")}</code><button class="link-btn" id="btnToken">重置</button></span></div>
+      <div class="kv-row"><span class="k">vault 路径</span><span class="v"><code>${esc(cfg?.vaultPath || "vault")}</code></span></div>
       <div class="kv-row"><span class="k">脚本安装</span><span class="v"><button class="link-btn" id="btnGuide">查看油猴脚本安装指引 →</button></span></div>
     </div>
     <div class="modal-foot"><button class="btn btn-ghost" data-close>取消</button><button class="btn btn-red" id="btnSaveSettings">保存设置</button></div>`;
   $("#overlayModal").hidden = false;
+
   $$("#segComment button").forEach((b) => b.onclick = () => { $$("#segComment button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); });
-  $$("[data-test]").forEach((b) => b.onclick = () => {
+
+  $$("[data-test]").forEach((b) => b.onclick = async () => {
     b.disabled = true; b.textContent = "测试中…";
-    setTimeout(() => {
-      const ms = 380 + Math.floor(Math.random() * 500);
-      b.disabled = false; b.textContent = "测试连接";
+    try {
+      const r = await api("/settings/test", { method: "POST", body: { slot: b.dataset.test } });
       const ok = $(`[data-ok="${b.dataset.test}"]`);
-      ok.hidden = false; ok.textContent = `连通 ${ms}ms`;
-    }, 900);
+      ok.hidden = false; ok.textContent = `连通 ${r.latencyMs}ms`;
+      toast(`${b.dataset.test === "text" ? "文本" : "视觉"}模型连通 · ${r.model}`, "ok");
+    } catch (e) {
+      toast(e.message || "连接失败", "err");
+    } finally {
+      b.disabled = false; b.textContent = "测试连接";
+    }
   });
-  $("#btnToken").onclick = () => toast("令牌已重置，请更新油猴脚本", "info");
+
+  $("#btnToken").onclick = async () => {
+    try {
+      await api("/settings", { method: "PUT", body: { capture: { resetToken: true } } });
+      toast("令牌已重置，请更新油猴脚本里的 token", "info");
+      openSettings();
+    } catch (e) { toast(e.message || "重置失败", "err"); }
+  };
   $("#btnGuide").onclick = () => toast("安装指引：复制脚本 → Tampermonkey 新建 → 粘贴保存", "info");
-  $("#btnSaveSettings").onclick = () => { closeModal(); toast("设置已保存到 data/config.json"); };
+  $("#btnSaveSettings").onclick = async () => {
+    const val = (sel) => ($(sel)?.value ?? "").trim();
+    const body = {
+      ai: {
+        text: { baseUrl: val("[data-slot=text-base]"), apiKey: val("[data-slot=text-key]"), model: val("[data-slot=text-model]") },
+        vision: { baseUrl: val("[data-slot=vision-base]"), apiKey: val("[data-slot=vision-key]"), model: val("[data-slot=vision-model]") }
+      },
+      capture: { commentCount: Number($$("#segComment button.on")?.dataset.v || 20) }
+    };
+    try {
+      await api("/settings", { method: "PUT", body });
+      closeModal(); toast("设置已保存到 data/config.json", "ok");
+    } catch (e) { toast(e.message || "保存失败", "err"); }
+  };
 }
 
 /* ── 路由 & 事件 ── */

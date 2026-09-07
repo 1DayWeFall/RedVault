@@ -2,14 +2,55 @@
 
 /**
  * 处理管线（DESIGN §5.5）
- * M3 最小版：无 AI 配置时 raw 直接落盘（摘要空/分类「未整理」），验证数据流；
- * M4 在 ai_processing 阶段接入双槽位模型（本文件预留 stage 常量与断点结构）。
- * 逐条串行（并发 1），失败保留断点可续跑。
+ * 逐条串行（并发 1），每条状态机：
+ *   downloading_images → ai_processing → relating → writing
+ * - 无 AI 配置时降级直落盘（摘要空/分类「未整理」），失败保留断点可续跑
+ * - 图片下载带 Referer；sharp 可用则压缩 + 生成 300px 缩略图，缺失则原图直用
+ * - 视觉模型一次合并调用（>6 张分批，后续批仅补 OCR）；纯文本/视频走文本槽位
  */
 
+const fs = require('fs');
+const path = require('path');
 const { renderNoteMd, safeTitle } = require('./vault');
+const { relatedNotes } = require('./relate');
 
 const STAGES = ['downloading_images', 'ai_processing', 'relating', 'writing'];
+
+const CATEGORIES = ['美食', '健康', '穿搭', '美妆', '家居', '旅行', '学习', '职场', '育儿', '科技', '理财', '运动', '其他'];
+
+/* ── Prompt（DESIGN §9 P1/P2） ── */
+const P1 = (title, desc, commentsTxt) => `你是小红书内容整理助手。这是同一篇帖子的若干张图片与文本信息，请一次性完成整理：
+1) ocr：逐图提取图中所有可见文字（无字则空字符串，按图顺序）
+2) summary：≤200 字摘要
+3) key_points：3–6 条可执行要点
+4) category：一级分类（严格从这些中选：${CATEGORIES.join('/')}）
+5) subcategory：细分场景（自由短语 ≤6 字）
+6) tags：3–5 个短标签
+7) comment_insights：高赞评论中的高价值补充（≤3 条，无则空数组）
+
+标题：${title}
+正文：${desc}
+评论：${commentsTxt}
+
+严格输出 JSON：{"ocr":[],"summary":"","key_points":[],"category":"","subcategory":"","tags":[],"comment_insights":[]}`;
+
+const P2 = (title, desc, commentsTxt, isVideo) => `你是小红书内容整理助手。请对这篇帖子（${isVideo ? '视频笔记，视频未转写，内容基于简介与评论' : '图文笔记'}）完成整理：
+1) summary：≤200 字摘要${isVideo ? '（末尾注明「视频未转写，内容基于简介与评论」）' : ''}
+2) key_points：3–6 条可执行要点
+3) category：一级分类（严格从这些中选：${CATEGORIES.join('/')}）
+4) subcategory：细分场景（自由短语 ≤6 字）
+5) tags：3–5 个短标签
+6) comment_insights：高赞评论中的高价值补充（≤3 条，无则空数组）
+
+标题：${title}
+正文：${desc}
+评论：${commentsTxt}
+
+严格输出 JSON：{"summary":"","key_points":[],"category":"","subcategory":"","tags":[],"comment_insights":[]}`;
+
+/* sharp 可选加载（§12 缺失降级原图） */
+let sharp = null;
+try { sharp = require('sharp'); } catch (_) {}
 
 /** raw.comments → 评论精选 markdown（含楼中楼缩进） */
 function renderCommentsMd(comments) {
@@ -21,18 +62,110 @@ function renderCommentsMd(comments) {
   return (comments || []).map((c) => line(c, '')).join('\n');
 }
 
+/** 下载图片存 attachments/{note_id}-{seq}.jpg；sharp 生成 thumb.webp（300px） */
+async function downloadImages(raw, noteId, attachDir) {
+  const urls = raw.image_urls || [];
+  const local = [];
+  const remote = [];
+  let thumb = '';
+  for (let i = 0; i < urls.length; i++) {
+    try {
+      const r = await fetch(urls[i], {
+        headers: { Referer: 'https://www.xiaohongshu.com', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      const name = `${noteId}-${i + 1}.jpg`;
+      fs.writeFileSync(path.join(attachDir, name), buf);
+      local.push({ file: `attachments/${name}`, seq: i + 1, abs: path.join(attachDir, name) });
+      if (!thumb && sharp) {
+        try {
+          await sharp(buf).rotate().resize({ width: 300, withoutEnlargement: true })
+            .webp({ quality: 75 }).toFile(path.join(attachDir, `${noteId}-thumb.webp`));
+          thumb = `attachments/${noteId}-thumb.webp`;
+        } catch (_) {}
+      }
+    } catch (e) {
+      remote.push(urls[i]);
+      console.warn(`[pipeline] 图片 ${i + 1} 下载失败: ${e.message}`);
+    }
+  }
+  return { local, remote, thumb };
+}
+
+/** 图片 → 压缩后 base64 data URL（vision 用，sharp 缺失则原图） */
+async function imageToBase64(abs) {
+  let buf = fs.readFileSync(abs);
+  let mime = 'image/jpeg';
+  if (sharp) {
+    try {
+      buf = await sharp(buf).rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 }).toBuffer();
+    } catch (_) {}
+  }
+  return `data:${mime};base64,` + buf.toString('base64');
+}
+
+/** AI 结果归一化（容错：字段缺失/越界给默认值） */
+function normalizeAi(r, isVideo = false) {
+  const out = {
+    ocr: Array.isArray(r.ocr) ? r.ocr.map(String).filter(Boolean) : [],
+    summary: String(r.summary || '').slice(0, 400),
+    key_points: Array.isArray(r.key_points) ? r.key_points.map(String).filter(Boolean).slice(0, 8) : [],
+    category: CATEGORIES.includes(r.category) ? r.category : '其他',
+    subcategory: String(r.subcategory || '').slice(0, 12),
+    tags: Array.isArray(r.tags) ? r.tags.map(String).filter(Boolean).slice(0, 6) : [],
+    comment_insights: Array.isArray(r.comment_insights) ? r.comment_insights.map(String).filter(Boolean).slice(0, 3) : []
+  };
+  if (isVideo && out.summary && !out.summary.includes('视频未转写')) {
+    out.summary += '（视频未转写，内容基于简介与评论）';
+  }
+  return out;
+}
+
+/** AI 整理（有图走 vision，否则 text；返回 null 表示未配置或失败由调用方降级） */
+async function runAi(ctx, raw, imgs) {
+  const commentsTxt = renderCommentsMd(raw.comments).slice(0, 3000);
+  const isVideo = raw.type === 'video';
+
+  if (imgs.local.length) {
+    const first = imgs.local.slice(0, 6);
+    const images = await Promise.all(first.map((l) => imageToBase64(l.abs)));
+    const content = [
+      { type: 'text', text: P1(raw.title, raw.desc, commentsTxt) },
+      ...images.map((url) => ({ type: 'image_url', image_url: { url } }))
+    ];
+    let result = normalizeAi(await ctx.ai.chatJson('vision', [{ role: 'user', content }], { maxTokens: 3000 }));
+    // 剩余批次仅补 OCR（每批 6 张）
+    for (let i = 6; i < imgs.local.length; i += 6) {
+      const batch = imgs.local.slice(i, i + 6);
+      const bImgs = await Promise.all(batch.map((l) => imageToBase64(l.abs)));
+      const bContent = [
+        { type: 'text', text: '这是同一篇帖子的后续图片，仅提取图中所有可见文字（无字返回空数组）。严格输出 JSON：{"ocr":[]}' },
+        ...bImgs.map((url) => ({ type: 'image_url', image_url: { url } }))
+      ];
+      try {
+        const r = await ctx.ai.chatJson('vision', [{ role: 'user', content: bContent }], { maxTokens: 2000 });
+        if (Array.isArray(r.ocr)) result.ocr = result.ocr.concat(r.ocr.map(String));
+      } catch (_) { /* 单批 OCR 失败不影响主结果 */ }
+    }
+    return result;
+  }
+  const result = await ctx.ai.chatJson('text', [{ role: 'user', content: P2(raw.title, raw.desc, commentsTxt, isVideo) }], { maxTokens: 2000 });
+  return normalizeAi(result, isVideo);
+}
+
 function createPipeline(ctx) {
-  const queue = [];        // { note_id, stage, status, error }
+  const queue = [];
   let running = false;
-  let sessionCost = 0;     // AI token 成本累计（M4 起计数）
 
   async function confirm(ids) {
     const inbox = ctx.store.readInbox();
     for (const id of ids) {
       const entry = inbox.find((x) => x.note_id === id && x.status === 'pending');
       if (!entry) continue;
-      ctx.store.updateInboxEntry(id, { status: 'processing', process: { stage: 'writing', started_at: new Date().toISOString() } });
-      queue.push({ note_id: id, stage: 'writing', status: 'queued', error: null });
+      ctx.store.updateInboxEntry(id, { status: 'processing', process: { stage: 'downloading_images', started_at: new Date().toISOString() } });
+      queue.push({ note_id: id, stage: 'downloading_images', status: 'queued', error: null });
     }
     runNext();
   }
@@ -57,70 +190,95 @@ function createPipeline(ctx) {
     if (queue.length) runNext();
   }
 
-  /** 单条处理：M3 = writing 直落盘；M4 在此插入图片下载/AI/relate */
   async function processOne(item) {
     const entry = ctx.store.readInbox().find((x) => x.note_id === item.note_id);
     if (!entry) { item.status = 'skipped'; return; }
     const raw = entry.raw;
     item.status = 'processing';
 
-    /* ── writing ── */
+    const cfg = ctx.store.readConfig();
+    const aiReady = !!(cfg.ai?.text?.apiKey || cfg.ai?.vision?.apiKey);
+
+    /* 1. downloading_images */
+    item.stage = 'downloading_images';
+    const imgs = raw.image_urls?.length
+      ? await downloadImages(raw, entry.note_id, ctx.vault.attachDir)
+      : { local: [], remote: [], thumb: '' };
+
+    /* 2. ai_processing（失败降级直落盘，不阻塞） */
+    let ai = null;
+    if (aiReady && ctx.ai) {
+      item.stage = 'ai_processing';
+      try {
+        ai = await runAi(ctx, raw, imgs);
+      } catch (e) {
+        console.warn(`[pipeline] ${item.note_id} AI 处理失败，降级直落盘: ${e.message}`);
+        ai = null;
+      }
+    }
+
+    /* 3. relating */
+    item.stage = 'relating';
+    const target = {
+      note_id: entry.note_id, title: raw.title,
+      category: ai?.category || '', subcategory: ai?.subcategory || '',
+      tags: ai?.tags?.length ? ai.tags : raw.tags || []
+    };
+    const related = relatedNotes(target, ctx.store.readIndex().notes);
+
+    /* 4. writing */
     item.stage = 'writing';
     const now = new Date().toISOString();
+    const commentsBlock = [renderCommentsMd(raw.comments) || '（无）'];
+    if (ai?.comment_insights?.length) {
+      commentsBlock.push('\n**AI 洞察**\n' + ai.comment_insights.map((c) => `- ${c}`).join('\n'));
+    }
     const fm = {
-      title: raw.title,
-      url: raw.source_url,
-      note_id: entry.note_id,
-      author: raw.author,
-      author_id: raw.author_id || '',
-      type: raw.type,
-      category: '未整理',
-      subcategory: '',
-      tags: raw.tags || [],
+      title: raw.title, url: raw.source_url, note_id: entry.note_id,
+      author: raw.author, author_id: raw.author_id || '', type: raw.type,
+      category: ai?.category || '未整理', subcategory: ai?.subcategory || '',
+      tags: ai?.tags?.length ? ai.tags : raw.tags || [],
       liked_count: raw.liked_count || 0,
-      published_at: raw.published_at || '',
-      collected_at: entry.captured_at,
+      published_at: raw.published_at || '', collected_at: entry.captured_at,
       created_at: now,
-      cover: raw.cover_url || '',           // M4 起指向本地缩略图
-      images: [],
-      ...(raw.image_urls?.length ? { images_remote: raw.image_urls } : {}),
-      related: [],
-      sources: [],
-      attachments: []
+      cover: imgs.thumb || raw.cover_url || '',
+      images: imgs.local.map((l) => l.file),
+      ...(imgs.remote.length ? { images_remote: imgs.remote } : {}),
+      related, sources: [], attachments: []
     };
     const md = renderNoteMd({
       fm,
-      summary: '',                                        // M4 AI 填充
-      points: [],
+      summary: ai?.summary || '',
+      points: ai?.key_points || [],
       body: raw.desc || '（正文缺失）',
-      ocr: [],
-      comments: renderCommentsMd(raw.comments) || '（无）',
-      related: [],
-      attachments: '',
-      remark: ''
+      ocr: ai?.ocr || [],
+      comments: commentsBlock.join('\n'),
+      related, attachments: '', remark: ''
     });
     const file = ctx.vault.writeNoteFile(safeTitle(raw.title), md);
     ctx.store.upsertIndexNote({
       note_id: entry.note_id, file, title: raw.title,
-      category: '未整理', subcategory: '', tags: raw.tags || [], type: raw.type,
+      category: fm.category, subcategory: fm.subcategory, tags: fm.tags, type: raw.type,
       published_at: raw.published_at || '', collected_at: entry.captured_at,
       created_at: now, modified_at: now,
-      cover: raw.cover_url || '', liked_count: raw.liked_count || 0,
-      has_attachment: false, related: [], sources: []
+      cover: fm.cover, liked_count: raw.liked_count || 0,
+      has_attachment: false, related, sources: []
     });
     ctx.store.removeInboxEntry(entry.note_id);
     item.status = 'done';
-    console.log(`[pipeline] done: ${entry.note_id} 《${raw.title}》 → ${file}`);
+    console.log(`[pipeline] done: ${entry.note_id} 《${raw.title}》 → ${file} (AI:${ai ? 'yes' : 'no'})`);
   }
 
   function status() {
+    const usage = ctx.ai?.usage() || {};
     return {
       queue: queue.map((q) => ({ ...q })),
-      sessionCost: Math.round(sessionCost * 1000) / 1000
+      sessionCost: Math.round(usage.cost * 10000) / 10000,
+      tokens: { in: usage.totalIn || 0, out: usage.totalOut || 0 }
     };
   }
 
-  return { confirm, status, addCost: (c) => { sessionCost += c; } };
+  return { confirm, status };
 }
 
-module.exports = { createPipeline, STAGES, renderCommentsMd };
+module.exports = { createPipeline, STAGES, renderCommentsMd, CATEGORIES };

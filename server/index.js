@@ -32,10 +32,12 @@ if (!sharpAvailable) {
 const { createStore } = require('./services/store');
 const { createVault } = require('./services/vault');
 const { createPipeline } = require('./services/pipeline');
+const { createAi } = require('./services/ai');
 const store = createStore(DATA_DIR);
 const vault = createVault(path.join(ROOT, store.readConfig().vaultPath || 'vault'));
-const pipeline = createPipeline({ store, vault });
-const ctx = { store, vault, pipeline, sharpAvailable };
+const ctx = { store, vault, sharpAvailable };
+ctx.ai = createAi(ctx);
+ctx.pipeline = createPipeline(ctx);
 
 const app = express();
 app.disable('x-powered-by');
@@ -44,11 +46,12 @@ app.use(express.urlencoded({ extended: false }));
 
 /* ── API 路由 ── */
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, name: 'RedVault', version: '0.2.0', sharp: sharpAvailable });
+  res.json({ ok: true, name: 'RedVault', version: '0.3.0', sharp: sharpAvailable });
 });
 app.use('/api', require('./routes/capture')(ctx));
 app.use('/api', require('./routes/inbox')(ctx));
 app.use('/api', require('./routes/notes')(ctx));
+app.use('/api', require('./routes/settings')(ctx));
 
 /* 未命中的 /api/* 统一 404 JSON（放在静态托管前） */
 app.use('/api', (req, res) => {
