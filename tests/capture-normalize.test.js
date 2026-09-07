@@ -79,6 +79,18 @@ test('校验失败：缺 note_id / 空内容', () => {
   assert.throws(() => normalizeCapture({ note_id: 'n4', note: {} }), (e) => e.code === 'EMPTY_CONTENT');
 });
 
+test('批量清单：xsec_token 溯源字段（capture/list 链路）', () => {
+  const { raw } = normalizeCapture({
+    note_id: 'n9',
+    xsec_token: 'ABcd1234',
+    note: { title: '清单条目', desc: 'x', user: { nickName: '作者' }, interactInfo: { likedCount: '3' } }
+  });
+  assert.equal(raw.xsec_token, 'ABcd1234');
+  // 未传时为空串，不影响旧 /api/capture 单条链路
+  const { raw: raw2 } = normalizeCapture({ note_id: 'n10', note: { title: 't', desc: 'x' } });
+  assert.equal(raw2.xsec_token, '');
+});
+
 test('toInt / toIso 边界', () => {
   assert.equal(toInt('8563'), 8563);
   assert.equal(toInt('2.3万'), 23000);

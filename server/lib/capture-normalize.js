@@ -128,7 +128,9 @@ function normalizeCapture(payload) {
     comments,
     comments_truncated: payload.comments_truncated === true,
     source_url: firstString(payload.source_url, note.sourceUrl) ||
-      `https://www.xiaohongshu.com/explore/${noteId}`
+      `https://www.xiaohongshu.com/explore/${noteId}`,
+    /* xsec_token 溯源：批量清单/详情抓取失败重试时需要（§5.1） */
+    xsec_token: firstString(payload.xsec_token, note.xsecToken, note.xsec_token)
   };
   return { note_id: String(noteId), raw };
 }
