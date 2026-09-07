@@ -813,7 +813,7 @@ async function openSettings() {
         text: { baseUrl: val("[data-slot=text-base]"), apiKey: val("[data-slot=text-key]"), model: val("[data-slot=text-model]") },
         vision: { baseUrl: val("[data-slot=vision-base]"), apiKey: val("[data-slot=vision-key]"), model: val("[data-slot=vision-model]") }
       },
-      capture: { commentCount: Number($$("#segComment button.on")?.dataset.v || 20) },
+      capture: { commentCount: Number(($$("#segComment button.on")[0]?.dataset.v) || 20) },
       vaultPath: ($("#vaultPathInput")?.value ?? "").trim()
     };
     try {
