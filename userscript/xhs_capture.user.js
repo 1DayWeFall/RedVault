@@ -150,32 +150,107 @@
     handleNote(id);
   }
 
-  /* ══════════════ 数据提取（零额外请求，读 __INITIAL_STATE__，多路径容错） ══════════════ */
+  /* ══════════════ 数据提取（不依赖 __INITIAL_STATE__，从页面 DOM 读 + 内部状态兜底） ══════════════ */
   function extractNote(id) {
-    const st = window.__INITIAL_STATE__;
-    if (!st) return null;
+    /* 兜底 1：从 __INITIAL_STATE__ 取（如果页面结构还能匹配上） */
+    const fromState = extractNoteFromState(id);
+    if (fromState) return fromState;
 
-    /* 候选路径：优先按 id 精确取，兼容 noteData/note 两套历史结构 */
-    const getMap = () => {
+    /* 主路径：从小红书笔记详情页的可见 DOM 取（不依赖内部状态，结构稳） */
+    const fromDom = extractNoteFromDom();
+    if (fromDom) return fromDom;
+
+    return null;
+  }
+
+  function extractNoteFromState(id) {
+    try {
+      const st = window.__INITIAL_STATE__;
+      if (!st) return null;
       const ndm = (st.note && st.note.noteDetailMap) || (st.noteData && st.noteData.noteDetailMap) || st.noteDetailMap;
-      return ndm;
-    };
-    const ndm = getMap();
-    let note = null;
-    if (ndm && ndm[id] && ndm[id].note) note = ndm[id].note;
-
-    /* 兜底（xhs-vault 经验）：noteDetailMap 的 key 偶尔不等于 note_id，遍历找第一个含 title/desc 的 note */
-    if (!note && ndm) {
+      if (!ndm) return null;
+      if (ndm[id] && ndm[id].note) { const n = ndm[id].note; n.__firstComments = n.comments || n.firstComments || []; return n; }
       for (const k in ndm) {
         const v = ndm[k] && ndm[k].note;
-        if (v && (v.title || v.desc)) { note = v; break; }
+        if (v && (v.title || v.desc)) { v.__firstComments = v.comments || v.firstComments || []; return v; }
       }
-    }
-    if (!note) return null;
+    } catch (_) {}
+    return null;
+  }
 
-    /* 首屏评论：note.comments 或 note.firstComments（供 collectFirstComments 用） */
-    note.__firstComments = note.comments || note.firstComments || [];
-    return note;
+  /* 从详情页 DOM 取笔记数据（小红书笔记页有标准 class，但 class 名常变，用语义选择器 + 文本特征） */
+  function extractNoteFromDom() {
+    try {
+      /* URL 中拿 id（备查） */
+      const m = location.pathname.match(/\/(?:explore|discovery\/item)\/([0-9a-f]+)/);
+      const id = m && m[1];
+
+      /* 标题：详情页有几个可能位置，按优先级找非空文本 */
+      const title = (
+        textOf('[data-v-a264d2fe]') ||                  // 旧版标题容器
+        textOf('h1.title, h1[class*="title"]') ||
+        textOf('meta[name="og:title"]', 'content') ||  // 兜底：og:title 必含
+        document.title.split(' - ')[0].trim() ||        // 兜底：document.title
+        ''
+      );
+
+      /* 正文：在 [class*="desc"] / [class*="content"] / note-content 里找 */
+      const desc = (
+        textOf('#detail-desc, .desc, [class*="desc"]:not(style), [class*="note-content"]') ||
+        textOf('meta[name="og:description"]', 'content') ||
+        ''
+      );
+
+      /* 作者 */
+      const author =
+        textOf('a.author, .author-wrapper .username, [class*="author"] [class*="name"]') ||
+        textOf('meta[name="og:author"]', 'content') ||
+        '';
+
+      if (!title && !desc) return null;
+
+      /* 视频：检测 video 标签 */
+      const videoEl = document.querySelector('video');
+      const video = videoEl ? { src: videoEl.src || videoEl.querySelector('source')?.src || '' } : null;
+
+      /* 图片：找 detail 图片列表 */
+      const imageList = [];
+      document.querySelectorAll('.carousel-container img, [class*="swiper"] img, [class*="media"] img, .note-image img').forEach((img) => {
+        const src = img.src || img.getAttribute('data-src');
+        if (src && !imageList.includes(src)) imageList.push(src);
+      });
+
+      return {
+        noteId: id,
+        title: title.slice(0, 200),
+        desc: desc.slice(0, 2000),
+        user: { nickName: author, nickname: author },
+        author: author,
+        type: videoEl ? 'video' : 'normal',
+        imageList: imageList.slice(0, 9).map((url) => ({ urlDefault: url, url })),
+        video: video,
+        tagList: extractTagsFromDom(),
+        xsecToken: new URLSearchParams(location.search).get('xsec_token') || '',
+        __firstComments: []
+      };
+    } catch (_) { return null; }
+  }
+
+  function extractTagsFromDom() {
+    const tags = [];
+    document.querySelectorAll('a.tag, [class*="tag"] span, [class*="topic"]').forEach((el) => {
+      const t = (el.textContent || '').trim().replace(/^#/, '');
+      if (t && !tags.includes(t)) tags.push(t);
+    });
+    return tags.slice(0, 8).map((name) => ({ name }));
+  }
+
+  /* 取元素文本内容（按选择器找第一个有可见文本的） */
+  function textOf(selector, attr) {
+    const el = document.querySelector(selector);
+    if (!el) return '';
+    if (attr) return (el.getAttribute(attr) || '').trim();
+    return (el.textContent || '').trim();
   }
 
   async function handleNote(id) {
