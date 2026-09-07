@@ -28,5 +28,4 @@ dist/
 build/
 
 # ===== 本地临时目录 =====
-.codebuddy/
 tmp/
