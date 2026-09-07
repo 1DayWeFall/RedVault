@@ -749,18 +749,18 @@ async function openSettings() {
         <button class="test-btn" data-test="text">测试连接</button></div>
         <div class="slot-grid">
           <div class="field w2"><label>Base URL</label><input type="text" data-slot="text-base" value="${esc(t.baseUrl)}" placeholder="https://api.example.com/v1"></div>
-          <div class="field"><label>API Key</label><input type="text" data-slot="text-key" value="${esc(t.apiKey)}" placeholder="sk-..."></div>
+          <div class="field"><label>API Key</label><input type="text" data-slot="text-key" value="" placeholder="留空不修改，重新输入以更换"></div>
           <div class="field"><label>模型</label><input type="text" data-slot="text-model" value="${esc(t.model)}" placeholder="gpt-4o-mini"></div>
         </div></div>
       <div class="slot-card"><div class="slot-head"><span class="tag">视觉模型（兼任 OCR）</span><span class="tag ok-tag" data-ok="vision" hidden>连通 0ms</span>
         <button class="test-btn" data-test="vision">测试连接</button></div>
         <div class="slot-grid">
           <div class="field w2"><label>Base URL</label><input type="text" data-slot="vision-base" value="${esc(v.baseUrl)}" placeholder="https://open.bigmodel.cn/api/paas/v4"></div>
-          <div class="field"><label>API Key</label><input type="text" data-slot="vision-key" value="${esc(v.apiKey)}" placeholder="sk-..."></div>
+          <div class="field"><label>API Key</label><input type="text" data-slot="vision-key" value="" placeholder="留空不修改，重新输入以更换"></div>
           <div class="field"><label>模型</label><input type="text" data-slot="vision-model" value="${esc(v.model)}" placeholder="glm-4v-plus"></div>
         </div></div>
       <div class="kv-row"><span class="k">评论抓取条数</span><span class="v"><span class="seg" id="segComment"><button data-v="10"${ccOn(10)}>10</button><button data-v="20"${ccOn(20)}>20</button><button data-v="50"${ccOn(50)}>50</button></span></span></div>
-      <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code>X-Capture-Token: ${esc(cfg?.capture?.token || "")}</code><button class="link-btn" id="btnToken">重置</button></span></div>
+      <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code id="tokenCode">${esc(cfg?.capture?.token || "")}</code><button class="link-btn" id="btnCopyToken">复制</button><button class="link-btn" id="btnToken">重置</button></span></div>
       <div class="kv-row"><span class="k">vault 路径</span><span class="v"><input type="text" id="vaultPathInput" value="${esc(cfg?.vaultPath || "vault")}" style="width:100%;box-sizing:border-box" placeholder="vault"></span></div>
       <div class="kv-row"><span class="k">脚本安装</span><span class="v"><button class="link-btn" id="btnGuide">查看油猴脚本安装指引 →</button></span></div>
     </div>
@@ -783,6 +783,21 @@ async function openSettings() {
     }
   });
 
+  $("#btnCopyToken").onclick = async () => {
+    const token = cfg?.capture?.token || "";
+    if (!token) { toast("无 token 可复制", "err"); return; }
+    try {
+      await navigator.clipboard.writeText(token);
+      toast("token 已复制，粘贴到油猴脚本 CONFIG.TOKEN", "ok");
+    } catch (_) {
+      const range = document.createRange();
+      range.selectNode($("#tokenCode"));
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      try { document.execCommand("copy"); toast("token 已复制（请粘贴到脚本 CONFIG.TOKEN）", "ok"); }
+      catch (_2) { toast("复制失败，请手动选中复制", "err"); }
+    }
+  };
   $("#btnToken").onclick = async () => {
     try {
       await api("/settings", { method: "PUT", body: { capture: { resetToken: true } } });

@@ -40,10 +40,12 @@ module.exports = function settingsRoutes(ctx) {
     const cfg = ctx.store.readConfig();
     res.json({
       ai: {
-        text: { ...cfg.ai.text, apiKey: maskKey(cfg.ai.text.apiKey) },
-        vision: { ...cfg.ai.vision, apiKey: maskKey(cfg.ai.vision.apiKey) }
+        // apiKey 返回空：避免前端回填脱敏值造成「误存掩码」，语义统一为「空 = 不修改」
+        text: { ...cfg.ai.text, apiKey: '' },
+        vision: { ...cfg.ai.vision, apiKey: '' }
       },
-      capture: { commentCount: cfg.capture.commentCount, token: maskKey(cfg.capture.token) },
+      // capture.token 返回明文：本地服务仅绑 127.0.0.1，供用户复制进油猴脚本
+      capture: { commentCount: cfg.capture.commentCount, token: cfg.capture.token },
       vaultPath: cfg.vaultPath
     });
   });

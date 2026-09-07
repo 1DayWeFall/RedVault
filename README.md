@@ -42,16 +42,27 @@ RedVault/
 ├── tests/                  # node:test 单测
 ├── docs/DESIGN.md          # 设计文档（唯一事实源）
 ├── vault/  data/           # 运行时数据（.gitignore，绝不入库）
+├── start.ps1               # 一键启动：清理旧进程 → 启动服务 → 探测健康 → 提示入口
 ├── sync.ps1                # 一键同步：git add → commit → push
 └── README.md               # 本文件
 ```
 
 ## 本地运行
 
+**唯一入口 `http://127.0.0.1:3789`**（端口固定）。推荐一键启动：
+
+```powershell
+.\start.ps1      # 自动清理残留进程并启动服务，提示唯一入口地址
+```
+
+等价方式（手动）：
+
 ```powershell
 npm install
 npm start        # → http://127.0.0.1:3789
 ```
+
+> ⚠️ `8923` 是历史 demo 预览端口，**已废弃**，请勿再使用。启动请一律走 `start.ps1` 或 `npm start`，端口固定 3789。
 
 数据来自真实采集，当前为**空库起步**（抓取一条进收件箱 → 确认 → 落盘一条）：
 
