@@ -1,0 +1,204 @@
+'use strict';
+
+/**
+ * vault 引擎（DESIGN §5.6 / §7 / §8）
+ * - 唯一真实源：所有笔记为 vault/ 下 .md 文件
+ * - 锚点区块：配对 HTML 注释包裹，编辑只替换目标区块，其余内容永不动
+ * - frontmatter 生成用 js-yaml（值安全转义），解析用 gray-matter
+ * - index 与 vault 不一致时以 vault 扫描重建（§5.3）
+ */
+
+const fs = require('fs');
+const path = require('path');
+const matter = require('gray-matter');
+const yaml = require('js-yaml');
+
+/* ── 区块定义（顺序固定，§8 模板） ── */
+const SECTIONS = {
+  summary:    '## 🧠 AI 摘要',
+  points:     '## 🔑 关键要点',
+  body:       '## 📄 原帖正文',
+  ocr:        '## 🖼 图片文字识别',
+  comments:   '## 💬 评论精选',
+  related:    '## 🔗 相关笔记',
+  attachments:'## 📎 补充材料',
+  remark:     '## ✏️ 我的备注'
+};
+const SYNTH_SECTIONS = {
+  overview: '## 🧭 主题概述',
+  common:   '## 🟢 共同要点',
+  diff:     '## 🟡 分歧与互补观点',
+  todo:     '## ✅ 可执行清单',
+  sources:  '## 📚 来源'
+};
+
+const wrap = (key, content) => `<!-- sec:${key} -->\n${String(content ?? '').trim()}\n<!-- /sec:${key} -->`;
+const section = (key, content) => `${SECTIONS[key]}\n\n${wrap(key, content)}\n\n`;
+
+/** 文件名清洗：非法字符 → 空格，压缩空白，截断 50（§5.6） */
+function safeTitle(title) {
+  return String(title || '未命名')
+    .replace(/[\\/:*?"<>|#^[\]\n\r\t]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 50) || '未命名';
+}
+
+/** 重名去重：title.md → title-2.md → title-3.md … */
+function uniqueFileName(vaultDir, base, ext = '.md') {
+  let name = base + ext;
+  let i = 2;
+  while (fs.existsSync(path.join(vaultDir, name))) {
+    name = `${base}-${i}${ext}`;
+    i++;
+  }
+  return name;
+}
+
+/* ── frontmatter ── */
+function buildFrontmatter(fm) {
+  return '---\n' + yaml.dump(fm, { lineWidth: -1, noRefs: true, sortKeys: false }).trim() + '\n---';
+}
+
+/** frontmatter 值中出现换行/特殊字符时的 yaml 安全性由 js-dump 保证；标题额外做文件名清洗 */
+
+/* ── 普通笔记渲染（§8） ── */
+function renderNoteMd({ fm, summary, points, body, ocr, comments, related, attachments, remark }) {
+  let md = buildFrontmatter(fm) + '\n\n';
+  md += section('summary', summary || '（待 AI 整理）');
+  md += section('points', (points || []).map((k) => `- ${k}`).join('\n') || '（待 AI 整理）');
+  md += section('body', body || '（原帖正文缺失）');
+  md += section('ocr', (ocr || []).map((o) => `- ${o}`).join('\n') || '（无）');
+  md += section('comments', comments || '（无）');
+  md += section('related', (related || []).map((r) => `- [[${r}]]`).join('\n') || '（暂无）');
+  md += section('attachments', attachments || '（空）');
+  md += section('remark', remark || '（空）');
+  return md.trimEnd() + '\n';
+}
+
+/* ── 合成笔记渲染（§8） ── */
+function renderSynthMd({ fm, overview, common, diff, todo, sources }) {
+  const w = (k, c) => `${SYNTH_SECTIONS[k]}\n\n${wrap(k, c)}\n\n`;
+  let md = buildFrontmatter(fm) + '\n\n';
+  md += w('overview', overview || '');
+  md += w('common', (common || []).map((k) => `- ${k}`).join('\n'));
+  md += w('diff', (diff || []).map((k) => `- ${k}`).join('\n'));
+  md += w('todo', (todo || []).map((k) => `- ${k}`).join('\n'));
+  md += w('sources', (sources || []).join('\n'));
+  return md.trimEnd() + '\n';
+}
+
+/* ── 锚点区块定位替换（§5.6 核心） ── */
+/**
+ * 只替换 `<!-- sec:key -->` 与 `<!-- /sec:key -->` 之间的内容；
+ * 其余任何内容（包括用户手写）原样保留。未找到锚点返回 null。
+ */
+function replaceSection(md, key, newContent) {
+  const open = `<!-- sec:${key} -->`;
+  const close = `<!-- /sec:${key} -->`;
+  const i = md.indexOf(open);
+  if (i < 0) return null;
+  const j = md.indexOf(close, i);
+  if (j < 0) return null;
+  return md.slice(0, i) + wrap(key, newContent) + md.slice(j + close.length);
+}
+
+function readSection(md, key) {
+  const open = `<!-- sec:${key} -->`;
+  const close = `<!-- /sec:${key} -->`;
+  const i = md.indexOf(open);
+  if (i < 0) return null;
+  const j = md.indexOf(close, i);
+  if (j < 0) return null;
+  return md.slice(i + open.length, j).trim();
+}
+
+/* ── vault 服务（路径注入） ── */
+function createVault(vaultDir) {
+  const attachDir = path.join(vaultDir, 'attachments');
+  fs.mkdirSync(attachDir, { recursive: true });
+
+  return {
+    dir: vaultDir,
+    attachDir,
+
+    /** 写入新笔记：返回实际文件名（已去重） */
+    writeNoteFile(baseName, mdText) {
+      const file = uniqueFileName(vaultDir, baseName);
+      fs.writeFileSync(path.join(vaultDir, file), mdText, 'utf-8');
+      return file;
+    },
+
+    readNoteFile(file) {
+      const full = path.join(vaultDir, file);
+      const raw = fs.readFileSync(full, 'utf-8');
+      const parsed = matter(raw);
+      return { fm: parsed.data, content: parsed.content, raw };
+    },
+
+    /** 编辑区块：只动目标锚点，modified_at 同步更新（§5.6） */
+    updateNoteFile(file, fmPatch, sectionPatch) {
+      const full = path.join(vaultDir, file);
+      let md = fs.readFileSync(full, 'utf-8');
+      const parsed = matter(md);
+
+      const fm = { ...parsed.data, ...fmPatch, modified_at: new Date().toISOString() };
+      let body = parsed.content;
+
+      for (const [key, val] of Object.entries(sectionPatch || {})) {
+        const next = replaceSection(body, key, val);
+        if (next === null) throw { status: 422, code: 'SECTION_NOT_FOUND', message: `笔记 ${file} 缺少区块 sec:${key}` };
+        body = next;
+      }
+      const out = buildFrontmatter(fm) + '\n' + body.replace(/^\n+/, '\n');
+      fs.writeFileSync(full, out, 'utf-8');
+      return out;
+    },
+
+    /** 以 vault 扫描重建 index（frontmatter 为准，§5.3） */
+    rebuildIndexMeta() {
+      const notes = [];
+      for (const f of fs.readdirSync(vaultDir)) {
+        if (!f.endsWith('.md')) continue;
+        try {
+          const { fm } = this.readNoteFile(f);
+          if (!fm.note_id) continue;
+          notes.push({
+            note_id: String(fm.note_id), file: f,
+            title: fm.title || f.replace(/\.md$/, ''),
+            category: fm.category || '', subcategory: fm.subcategory || '',
+            tags: Array.isArray(fm.tags) ? fm.tags : [],
+            type: fm.type || 'normal',
+            published_at: fm.published_at || '', collected_at: fm.collected_at || '',
+            created_at: fm.created_at || '', modified_at: fm.modified_at || '',
+            cover: fm.cover || '', liked_count: fm.liked_count || 0,
+            has_attachment: Array.isArray(fm.attachments) && fm.attachments.length > 0,
+            related: Array.isArray(fm.related) ? fm.related : [],
+            sources: Array.isArray(fm.sources) ? fm.sources : []
+          });
+        } catch (err) {
+          console.warn(`[vault] 重建 index 跳过损坏文件: ${f} (${err.message})`);
+        }
+      }
+      return notes;
+    },
+
+    /** 删除笔记 + 按 note_id 前缀清理其附件（命名规则 §5.5 保证归属） */
+    deleteNoteFile(file, noteId) {
+      fs.unlinkSync(path.join(vaultDir, file));
+      let cleaned = 0;
+      for (const f of fs.readdirSync(attachDir)) {
+        if (f.startsWith(noteId + '-')) {
+          try { fs.unlinkSync(path.join(attachDir, f)); cleaned++; } catch (_) {}
+        }
+      }
+      return cleaned;
+    }
+  };
+}
+
+module.exports = {
+  SECTIONS, SYNTH_SECTIONS, createVault,
+  safeTitle, uniqueFileName, buildFrontmatter,
+  renderNoteMd, renderSynthMd, replaceSection, readSection, wrap, section
+};
