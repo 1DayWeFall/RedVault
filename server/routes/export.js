@@ -1,0 +1,29 @@
+'use strict';
+
+/**
+ * 导出路由（DESIGN §5.10 / §6 GET /export）
+ * archiver 流式打包 vault 全部内容（.md + attachments/），不整库载入内存。
+ */
+
+const express = require('express');
+const archiver = require('archiver');
+
+module.exports = function exportRoutes(ctx) {
+  const router = express.Router();
+
+  router.get('/export', (req, res, next) => {
+    try {
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.on('error', (e) => next(e));
+      archive.on('warning', (w) => { if (w.code !== 'ENOENT') console.warn('[export]', w.message); });
+
+      const date = new Date().toISOString().slice(0, 10);
+      res.attachment(`redvault-${date}.zip`);
+      archive.pipe(res);
+      archive.directory(ctx.vault.dir, false); // vault 根内容（含 attachments/）原样打包
+      archive.finalize();
+    } catch (e) { next(e); }
+  });
+
+  return router;
+};

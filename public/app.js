@@ -374,6 +374,7 @@ async function openDetail(id) {
         n.diff = s.diff || n.diff;
         n.todo = s.todo || n.todo;
         n.remark = s.remark && s.remark !== "（空）" ? s.remark : (n.remark || "");
+        n.attachments = Array.isArray(d.fm.attachments) ? d.fm.attachments : [];
       }
       n.__loaded = true;
     } catch (e) { toast(e.message || "详情加载失败", "err"); }
@@ -453,21 +454,41 @@ async function openDetail(id) {
   $$(".rel-card", $("#drawerDetail")).forEach((c) => c.onclick = () => openDetail(c.dataset.id));
   $$(".src-item", $("#drawerDetail")).forEach((c) => c.onclick = () => { closeDetail(); setTimeout(() => openDetail(c.dataset.id), 120); });
   $$("[data-merge]", $("#drawerDetail")).forEach((b) => b.onclick = () => {
-    const a = n.attachments[+b.dataset.merge];
-    a.merged = true;
-    toast("附件要点已合并进「补充材料」区块");
-    openDetail(id);
+    const a = n.attachments.find((x) => x.id === b.dataset.merge);
+    if (!a) return;
+    api(`/notes/${encodeURIComponent(id)}/attachments/${a.id}/merge`, { method: "POST" })
+      .then(() => { toast("附件要点已合并进「补充材料」区块", "ok"); openDetail(id); })
+      .catch((e) => toast(e.message || "合并失败（需配置文本/视觉模型）", "err"));
   });
   $$("[data-rmatt]", $("#drawerDetail")).forEach((b) => b.onclick = () => {
-    n.attachments.splice(+b.dataset.rmatt, 1);
-    toast("附件及其区块已移除", "info");
-    openDetail(id);
+    const a = n.attachments.find((x) => x.id === b.dataset.rmatt);
+    if (!a) return;
+    api(`/notes/${encodeURIComponent(id)}/attachments/${a.id}`, { method: "DELETE" })
+      .then(() => { toast("附件已移除", "info"); openDetail(id); })
+      .catch((e) => toast(e.message || "移除失败", "err"));
   });
   $$(".chip-cat.editable", $("#drawerDetail")).forEach((c) => c.onclick = () => toast("行内编辑（演示）：保存后仅替换该区块", "info"));
   $("#attDrop") && ($("#attDrop").onclick = () => {
-    (n.attachments = n.attachments || []).push({ name: "截图 2026-09-07.png", size: "268KB", merged: false });
-    toast("已上传 1 个附件");
-    openDetail(id);
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = ".md,.txt,.jpg,.jpeg,.png,.webp,.pdf";
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append("file", f);
+      try {
+        const res = await fetch(`/api/notes/${encodeURIComponent(id)}/attachments`, { method: "POST", body: fd });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          toast((j.error && j.error.message) || "上传失败", "err");
+          return;
+        }
+        toast("附件已上传", "ok");
+        openDetail(id);
+      } catch (e) { toast(e.message || "上传失败", "err"); }
+    };
+    inp.click();
   });
 }
 
@@ -515,12 +536,12 @@ function attachSection(n) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       拖拽文件到此处，或点击上传（md / pdf / jpg ≤ 20MB）
     </div>
-    ${atts.length ? `<div class="att-list">${atts.map((a, i) => `
-      <div class="att-item"><span class="att-ico">📄</span>
+    ${atts.length ? `<div class="att-list">${atts.map((a) => `
+      <div class="att-item"><span class="att-ico">${a.ext === ".pdf" ? "📕" : (a.ext || "").match(/jpg|jpeg|png|webp/) ? "🖼" : "📄"}</span>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name)}</span>
-        <span class="att-meta">${esc(a.size)}</span>
-        ${a.merged ? `<span style="font-size:10.5px;color:var(--ok)">已合并</span>` : `<button class="mini-btn ai" data-merge="${i}">◆ AI 合并</button>`}
-        <div class="mini-actions"><button class="mini-btn danger" data-rmatt="${i}">移除</button></div>
+        <span class="att-meta">${Math.max(1, Math.round((a.size || 0) / 1024))}KB</span>
+        ${a.merged ? `<span style="font-size:10.5px;color:var(--ok)">已合并</span>` : `<button class="mini-btn ai" data-merge="${a.id}">◆ AI 合并</button>`}
+        <div class="mini-actions"><button class="mini-btn danger" data-rmatt="${a.id}">移除</button></div>
       </div>`).join("")}</div>` : ""}</div>`;
 }
 
@@ -668,7 +689,7 @@ function openSynthesize() {
   $("#synGo").onclick = () => runSynthesize(sel);
 }
 
-function runSynthesize(sel) {
+async function runSynthesize(sel) {
   const theme = ($("#synTheme").value || "").trim();
   const steps = ["组装上下文（frontmatter + 摘要 + 要点）", "AI 生成合成正文（P4）", "写入 vault 并更新互链"];
   $("#modalBox").querySelector(".modal-body").innerHTML = `
@@ -681,48 +702,26 @@ function runSynthesize(sel) {
     </div>`;
   $("#modalBox").querySelector(".modal-foot").innerHTML = `<button class="btn btn-ghost" disabled>生成中…</button>`;
   const stepEls = $$("[data-step]");
-  let i = 0;
-  const tick = () => {
-    if (i > 0) { stepEls[i - 1].classList.remove("doing"); stepEls[i - 1].classList.add("done"); }
-    if (i < steps.length) {
-      stepEls[i].classList.add("doing");
-      $("#genBar").style.width = ((i + 1) / steps.length * 100) + "%";
-      i++; setTimeout(tick, 1000);
-    } else {
-      const syn = buildSynNote(sel, theme);
-      NOTES.unshift(syn);
-      App.sessionCost += 0.02 + sel.length * 0.015;
-      closeModal();
-      exitSelectMode();
-      renderSidebar();
-      if (App.view === "library") renderLibrary();
-      toast("合成笔记已生成并入库");
-      setTimeout(() => openDetail(syn.id), 250);
-    }
-  };
-  tick();
-}
-
-function buildSynNote(sel, theme) {
-  const titles = sel.map((s) => s.title);
-  const srcIdx = (i) => `（来源 ${i + 1}）`;
-  return {
-    id: uid("syn"), type: "synthesis", __loaded: true,
-    title: "合成 · " + (theme || sel[0].category && `「${sel[0].category}」主题整理` || "跨主题整理"),
-    sources: sel.map((s) => s.id), tags: ["AI合成", ...(theme ? [theme.slice(0, 6)] : [])], h: 1.2,
-    collected_at: "2026-09-07", liked: 0,
-    overview: `本篇由 ${sel.length} 篇笔记合成：${titles.map((t, i) => `来源 ${i + 1}《${t.slice(0, 12)}…》`).join("、")}。AI 提炼了共同的实践框架、互补的分工建议与可直接执行的行动清单。`,
-    common: sel.map((s, i) => (s.key_points ? s.key_points[0] : s.title) + srcIdx(i)).slice(0, 4),
-    diff: [
-      `来源笔记的方法各有侧重：${titles[0] ? "第 1 篇" : ""}强调结构化执行${srcIdx(0)}，其余篇目补充了不同场景的变式做法`,
-      "合成结论：先按第一篇框架执行两周，再按其余篇目按需微调",
-    ],
-    todo: [
-      "把共同要点抄进周计划，标注来源笔记",
-      "分歧点单独开一张卡片，实践后回填结论",
-      "一个月后把实践结果作为新笔记，再次参与合成",
-    ],
-  };
+  let si = 0;
+  const anim = setInterval(() => {
+    if (si > 0) { stepEls[si - 1]?.classList.remove("doing"); stepEls[si - 1]?.classList.add("done"); }
+    if (si < steps.length) { stepEls[si]?.classList.add("doing"); $("#genBar").style.width = ((si + 1) / steps.length * 100) + "%"; si++; }
+  }, 900);
+  try {
+    const r = await api("/synthesize", { method: "POST", body: { noteIds: sel.map((s) => s.id), theme } });
+    clearInterval(anim);
+    await loadAll();
+    closeModal();
+    exitSelectMode();
+    renderSidebar();
+    if (App.view === "library") renderLibrary();
+    toast("合成笔记已生成并入库", "ok");
+    setTimeout(() => openDetail(r.note_id), 250);
+  } catch (e) {
+    clearInterval(anim);
+    toast(e.message || "合成失败（请先在设置页配置文本模型）", "err");
+    closeModal();
+  }
 }
 
 function exitSelectMode() {
@@ -874,14 +873,11 @@ async function boot() {
     return `# 薯藏 RedVault · 库目录\n\n> 共 ${NOTES.length} 篇 · 导出于 ${new Date().toLocaleDateString("zh-CN")}\n> 用法：把 redvault 文件夹放入 Obsidian 库（或把 Obsidian 库直接指向它）。重复导出解压时选"覆盖"，只会更新同名笔记，其余文件不动。\n\n## 全部笔记\n${rows}\n`;
   };
   $("#btnExport").onclick = () => {
-    const entries = [{ name: "redvault/INDEX.md", text: buildIndexMd() }, ...NOTES.map((n) => ({ name: "redvault/" + vaultName(n), text: noteToMd(n) }))];
-    const blob = buildZip(entries);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "redvault-obsidian-" + new Date().toISOString().slice(0, 10) + ".zip";
+    a.href = "/api/export";
+    a.download = "redvault-" + new Date().toISOString().slice(0, 10) + ".zip";
     document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast("已导出 Obsidian 库 zip · " + NOTES.length + " 篇笔记 + INDEX");
+    toast("已开始导出 vault（.md + attachments），含全部笔记");
   };
   $("#btnCancelSelect").onclick = exitSelectMode;
   $("#btnOpenSynthesize").onclick = openSynthesize;

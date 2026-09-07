@@ -52,6 +52,9 @@ app.use('/api', require('./routes/capture')(ctx));
 app.use('/api', require('./routes/inbox')(ctx));
 app.use('/api', require('./routes/notes')(ctx));
 app.use('/api', require('./routes/settings')(ctx));
+app.use('/api', require('./routes/synthesize')(ctx));
+app.use('/api', require('./routes/attachments')(ctx));
+app.use('/api', require('./routes/export')(ctx));
 
 /* 未命中的 /api/* 统一 404 JSON（放在静态托管前） */
 app.use('/api', (req, res) => {
@@ -66,7 +69,8 @@ app.use(express.static(path.join(ROOT, 'public')));
 app.use((err, req, res, next) => {
   console.error('[error]', req.method, req.originalUrl, '→', err.message || err);
   if (res.headersSent) return next(err);
-  const status = err.status || 500;
+  let status = err.status || 500;
+  if (err.name === 'MulterError') status = 400; // 文件过大/类型错误等
   res.status(status).json({
     error: { code: err.code || 'INTERNAL', message: status >= 500 ? '服务器内部错误' : (err.message || '请求失败') }
   });
