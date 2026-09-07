@@ -27,28 +27,58 @@ function exploreUrl(noteId, xsecToken) {
 
 /** HTML → window.__INITIAL_STATE__ 对象；不存在（302 登录页等）返回 null */
 function extractInitialState(html) {
+  const m = html.match(/window\.__INITIAL_STATE__\s*=\s*([\s\S]*?)<\/script>/);
+  if (!m) return null;
+  const sanitize = (t) => t.trim().replace(/;$/, '').replace(/\bundefined\b/g, 'null');
+  // 页面内联对象含裸 undefined（非法 JSON），统一替换为 null
   try {
-    const m = html.match(/window\.__INITIAL_STATE__\s*=\s*([\s\S]*?)<\/script>/);
-    if (!m) return null;
-    // 页面内联对象含裸 undefined（非法 JSON），统一替换为 null
-    const text = m[1].trim().replace(/;$/, '').replace(/\bundefined\b/g, 'null');
-    return JSON.parse(text);
+    return JSON.parse(sanitize(m[1]));
   } catch (_) {
+    /* 防御：正文含 "</script>" 字符串时非贪婪正则提前截断 → 从首个 { 起括号配平重试 */
+    const start = html.indexOf('{', m.index);
+    if (start < 0) return null;
+    let depth = 0, quote = null, esc = false;
+    for (let i = start; i < html.length; i++) {
+      const ch = html[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (quote) { if (ch === quote) quote = null; continue; }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          try { return JSON.parse(sanitize(html.slice(start, i + 1))); } catch (_) { return null; }
+        }
+      }
+    }
     return null;
   }
 }
 
 /**
- * 字幕选择：subtitles 挂在 video.media.video.subtitles（dict 按语言分组），
+ * 字幕选择（2026-09 实测挂载）：subtitles 位于 video.mediaV2（JSON 字符串）内，
+ * 形如 {"video":{...},"subtitles":{"en-US":[{url}]}}；旧结构 media.video.subtitles 保留容错。
  * 多路径容错；优先级 source > zh-CN > zh > en-US > en > 任意。
  * @returns {{url, lang} | null}
  */
 function pickSubtitleUrl(video) {
   const deep = [];
+  const pushHolder = (v) => {
+    if (!v || typeof v !== 'object') return;
+    deep.push(v);
+    if (v.video) deep.push(v.video);
+  };
   const walk = (v) => {
     if (!v || typeof v !== 'object') return;
-    if (v.media) deep.push(v.media);
-    if (v.video) deep.push(v.video);
+    if (v.media) pushHolder(v.media);
+    if (v.mediaV2) {
+      // 实测主路径：mediaV2 为 JSON 字符串，subtitles 与 video 平级挂在根上
+      try {
+        const mv = typeof v.mediaV2 === 'string' ? JSON.parse(v.mediaV2) : v.mediaV2;
+        pushHolder(mv);
+      } catch (_) { /* mediaV2 非法则跳过 */ }
+    }
     if (v.stream) {
       try {
         const s = typeof v.stream === 'string' ? JSON.parse(v.stream) : v.stream;

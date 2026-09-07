@@ -70,6 +70,17 @@ function renderCommentsMd(comments) {
   return (comments || []).map((c) => line(c, '')).join('\n');
 }
 
+/** 正文区块：视频笔记无字幕且正文为空/纯话题标签时，追加降级说明（DESIGN §5.5 P2） */
+function buildBody(raw) {
+  let body = String(raw.desc || '');
+  const hasSubtitle = String(raw.subtitle_text || '').trim().length > 0;
+  if (raw.type === 'video' && !hasSubtitle) {
+    const textOnly = body.replace(/#[^\s#]+#/g, '').replace(/\s+/g, '').trim();
+    if (!textOnly) body = (body ? body + '\n\n' : '') + '> 视频未转写，正文以简介与图片为准';
+  }
+  return body || '（正文缺失）';
+}
+
 /** 下载图片存 attachments/{note_id}-{seq}.jpg；sharp 生成 thumb.webp（300px） */
 async function downloadImages(raw, noteId, attachDir) {
   const urls = raw.image_urls || [];
@@ -263,7 +274,7 @@ function createPipeline(ctx) {
       fm,
       summary: ai?.summary || '',
       points: ai?.key_points || [],
-      body: raw.desc || '（正文缺失）',
+      body: buildBody(raw),
       ocr: ai?.ocr || [],
       subtitle: hasSubtitle ? subtitleText : '',
       comments: commentsBlock.join('\n'),

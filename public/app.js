@@ -566,7 +566,7 @@ function openPreview(id) {
         <div><h4 style="font-size:15px;font-weight:600;line-height:1.45">${r.type === "video" ? `<span class="cover-badge video" style="position:static;margin-right:6px">视频</span>` : ""}${esc(r.title)}</h4>
         <div class="inbox-card-meta" style="margin-top:6px">@${esc(r.author)}<span class="dot"></span>♥ ${fmtK(r.liked_count)}<span class="dot"></span>${(r.tags || []).map((t) => "#" + esc(t)).join(" ")}</div></div>
       </div>
-      <div class="sec sec--gray" style="margin-bottom:12px"><div class="sec-head"><h4>正文全文</h4></div><p>${esc(r.desc)}</p>
+      <div class="sec sec--gray" style="margin-bottom:12px"><div class="sec-head"><h4>正文全文</h4></div><p style="white-space:pre-line">${esc(r.desc)}</p>
         <p style="margin-top:8px;font-size:12px;color:var(--ink3)">${(r.image_urls || []).length} 张图片将随处理下载并压缩至 attachments/。</p></div>
       <div class="sec"><div class="sec-head"><h4>评论 ${(r.comments || []).length} 条</h4></div>
         <div style="display:flex;flex-direction:column;gap:8px">${(r.comments || []).map((c) => `
