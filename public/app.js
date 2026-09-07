@@ -15,278 +15,69 @@ const COV = {
   "运动": ["linear-gradient(135deg,#E3F0F9,#C0DCF0)", "🏃"],
 };
 
-const NOTES = [
-  {
-    id: "n1", type: "normal", title: "减脂期一周晚餐备餐：热量缺口这样吃才不饿",
-    author: "低卡厨房日记", url: "https://www.xiaohongshu.com/explore/n1",
-    published_at: "2026-08-30", collected_at: "2026-09-01", liked: 12483,
-    category: "健康", subcategory: "减脂饮食", tags: ["减脂", "备餐", "热量缺口"], h: 1.25,
-    summary: "以 TDEE −300kcal 为目标示范一周晚餐备餐：杂粮饭 150g 熟重、每餐蛋白 30g 起（鸡胸/虾/豆腐轮换）、蔬菜不限量先吃。结论：热量缺口不必挨饿，靠大体积蔬菜与足量蛋白稳住饱腹感；适用条件是有冰箱与微波炉的上班族。",
-    key_points: [
-      "每餐结构：蛋白 30g + 杂粮主食 150g + 蔬菜 200g 以上，先吃菜再吃主食",
-      "周日统一备餐 90 分钟：腌肉分装、杂粮饭冷冻、切好的蔬菜三天内吃完",
-      "酱汁是隐形炸弹：油醋汁热量不到焙煎芝麻酱的一半",
-      "平台期优先加运动量而非继续砍热量，缺口不建议超过 500kcal",
-    ],
-    ocr: ["图1：备餐盒标注 热量 412kcal / 蛋白 34g / 碳水 38g", "图2：一周采购清单与预算约 ¥180"],
-    comments: [
-      { text: "照着吃了两周，掉了 1.8kg 而且真的不饿", likes: 2140, author: "momo", replies: [
-          { text: "晚餐也这么吃吗？会不会半夜饿醒", likes: 58, author: "niki" },
-          { text: "晚餐主食减半再加一拳蔬菜，完全不饿", likes: 240, author: "momo", op: true },
-        ] },
-      { text: "补充：杂粮饭冷冻后抗性淀粉增加，升糖更友好", likes: 986, author: "营养师范范", replies: [
-          { text: "冷冻后需要解冻再加热吗，还是直接蒸", likes: 33, author: "阿花" },
-        ] },
-      { text: "问一下酱汁是什么牌子", likes: 203, author: "小王" },
-    ],
-    remark: "下周试做图 2 的采购清单，预算控制在 200 以内。",
-    attachments: [{ name: "备餐热量表.pdf", size: "412KB", merged: true }],
-  },
-  {
-    id: "n2", type: "normal", title: "手冲咖啡进阶：粉水比、水温与三段注水",
-    author: "豆叔的冲煮笔记", url: "https://www.xiaohongshu.com/explore/n2",
-    published_at: "2026-08-22", collected_at: "2026-08-24", liked: 8951,
-    category: "美食", subcategory: "咖啡冲煮", tags: ["手冲", "咖啡", "冲煮参数"], h: 1.0,
-    summary: "从 1:15 与 1:16 两个粉水比对照讲起：浅烘豆 92°C 三段注水（闷蒸 30s → 补至 60% → 收尾绕圈），深烘降到 88°C 并缩短总时长到 2 分钟。结论：先固定研磨再调比，一次只动一个变量。",
-    key_points: [
-      "浅烘豆：92°C / 1:15 / 总时长 2'15\"；深烘豆：88°C / 1:14 / 2'00\"",
-      "闷蒸水量为粉量 2 倍，出现汉堡状排气说明豆子新鲜",
-      "调参顺序：研磨度 → 粉水比 → 水温，一次只改一项",
-      "注水绕圈半径恒定，避免冲刷滤纸壁造成通道效应",
-    ],
-    ocr: ["图1：萃取率与浓度控制图（SCA 金杯区间）"],
-    comments: [
-      { text: "一次只动一个变量这句是真理，我调了一个月才懂", likes: 1502, author: "拿铁不加糖" },
-      { text: "深烘 88 度亲测有效，苦味干净很多", likes: 741, author: "晨晨" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n3", type: "normal", title: "京都五日：避开人流的寺院与咖啡散步路线",
-    author: "散步系旅行家", url: "https://www.xiaohongshu.com/explore/n3",
-    published_at: "2026-09-02", collected_at: "2026-09-03", liked: 23610,
-    category: "旅行", subcategory: "日本关西", tags: ["京都", "citywalk", "小众路线"], h: 1.4,
-    summary: "以「早寺院 + 午咖啡 + 傍晚町屋」为骨架：清晨 7 点的永观堂几乎无人，午后穿插三家独立烘焙店，傍晚走石塀小路避开二年坂人潮。附各段步行时间与巴士换乘方案。",
-    key_points: [
-      "寺院赶早：永观堂 7:30 入场，游客比清水寺少一个量级",
-      "咖啡动线：quinciunques（京大前）→ Weekenders（木屋町）→ 小川咖啡三条本店",
-      "石塀小路 17:00 后光线最佳且人流回落，适合收尾",
-      "巴士一日券 ¥700，全程步行加巴士可覆盖，不需要打车",
-    ],
-    ocr: ["图3：手绘路线图，标注五日步行分段与耗时"],
-    comments: [
-      { text: "石塀小路傍晚真的绝，跟着走一天不踩雷", likes: 3211, author: "kyoto_mai", replies: [
-          { text: "请问永观堂银杏几点去人最少", likes: 76, author: "Taka" },
-          { text: "工作日早上九点前基本包场，亲测", likes: 412, author: "kyoto_mai", op: true },
-        ] },
-      { text: "补充：永观堂每周四有坐禅体验需预约", likes: 862, author: "阿叶" },
-    ],
-    remark: "明年樱花季用这条路线，重点标记永观堂。", attachments: [],
-  },
-  {
-    id: "n4", type: "normal", title: "8 平米出租房灯光改造：¥300 以内的三层光",
-    author: "租屋改造手册", url: "https://www.xiaohongshu.com/explore/n4",
-    published_at: "2026-07-18", collected_at: "2026-07-20", liked: 15702,
-    category: "家居", subcategory: "出租屋改造", tags: ["出租屋", "灯光", "低成本改造"], h: 1.1,
-    summary: "用「环境光 + 功能光 + 氛围光」三层结构改造出租屋：顶灯 4000K 做环境光，桌面 5000K 条形灯做功能光，床头 2700K 落地灯做氛围光。全部走插座无需改线，退租可整体带走。",
-    key_points: [
-      "三层光公式：4000K 环境 + 5000K 功能 + 2700K 氛围，各层独立开关",
-      "首选可换泡的落地灯与夹灯，避免吊装破坏天花板",
-      "显色指数 Ra≥90，看灯泡包装的 CRI 一行",
-      "预算分配：落地灯 129 / 桌面条灯 89 / 灯泡×3 共 72",
-    ],
-    ocr: ["图2：改造前后对比，同机位同白平衡"],
-    comments: [
-      { text: "Ra≥90 这个细节太重要，之前的灯把饭菜拍得发绿", likes: 1980, author: "夕颜" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n5", type: "normal", title: "通勤西装的松弛感：三件套的四种穿法",
-    author: "衣柜编辑室", url: "https://www.xiaohongshu.com/explore/n5",
-    published_at: "2026-08-28", collected_at: "2026-08-29", liked: 6420,
-    category: "穿搭", subcategory: "通勤西装", tags: ["通勤", "西装", "叠穿"], h: 1.5,
-    summary: "同一套灰蓝三件套换内搭与鞋包装出四种场景：马甲单穿配乐福鞋的周末版、高领针织配切尔西的秋冬版、oversize 衬衫配帆布鞋的创意行业版。核心是西装选微垫肩单排两粒扣，留出叠穿余量。",
-    key_points: [
-      "西装买大半码留叠穿余量，袖长以衬衫露出 1cm 为准",
-      "马甲单穿利用率最高，配九分裤拉高腰线",
-      "鞋决定场合：乐福 → 周末，德比 → 会议，帆布 → 创意行业",
-    ],
-    ocr: [],
-    comments: [
-      { text: "买大半码这个建议救了我，之前总是紧绷", likes: 913, author: "林林" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n6", type: "normal", title: "敏感肌早 C 晚 A 实操：建立耐受的 8 周",
-    author: "成分党小葵", url: "https://www.xiaohongshu.com/explore/n6",
-    published_at: "2026-08-15", collected_at: "2026-08-16", liked: 18922,
-    category: "美妆", subcategory: "成分护肤", tags: ["早C晚A", "敏感肌", "建立耐受"], h: 1.2,
-    summary: "敏感肌低浓度起步：VC 选 10% 以下衍生物，A 醛从每周两次短时接触法开始，第 5 周起隔天使用，全程修护霜打底。出现持续泛红立即回退上一阶段。结论：慢就是快，8 周建立耐受比激进用法成功率高得多。",
-    key_points: [
-      "起步浓度：VC 选 8–10% 衍生物，A 类选 0.05–0.1% A 醛或 HPR",
-      "短时接触法：A 类上脸 20 分钟后洗掉，前两周每周仅 2 次",
-      "泛红超过 30 分钟就回退到上一阶段",
-      "早 C 必须配防晒，否则反黑风险大于收益",
-    ],
-    ocr: ["图1：8 周耐受建立节奏表"],
-    comments: [
-      { text: "短时接触法真的适合我这种烂脸体质", likes: 2760, author: "敏感肌十年", replies: [
-          { text: "短时是多久？五分钟吗", likes: 91, author: "干皮星人" },
-          { text: "我从 10 分钟开始建立耐受，逐步拉长", likes: 305, author: "敏感肌十年", op: true },
-        ] },
-      { text: "提醒：屏障受损期先修护再上功效", likes: 1520, author: "皮肤科 Dr.Lu" },
-    ],
-    remark: "第 3 周开始尝试，记录泛红时长。", attachments: [],
-  },
-];
-NOTES.push(
-  {
-    id: "n7", type: "normal", title: "用间隔重复法三个月背完 6000 词：全部设置",
-    author: "学习工具箱", url: "https://www.xiaohongshu.com/explore/n7",
-    published_at: "2026-09-01", collected_at: "2026-09-02", liked: 9877,
-    category: "学习", subcategory: "记忆方法", tags: ["间隔重复", "Anki", "背单词"], h: 0.95,
-    summary: "6000 词拆成 60 组×100，每天 1 组新词，复习按默认调度，三个月完成第一轮。关键设置：新卡上限 100/天、只做认读方向不做拼写、复习优先于新卡。日均投入 35 分钟。",
-    key_points: [
-      "卡片只做英→中认读，拼写交给阅读自然巩固",
-      "新卡 100/天上限，只在状态好的上午开新",
-      "连错两次的卡片加助记符字段，不硬背",
-      "时间不够时先保复习队列清零，再开新卡",
-    ],
-    ocr: [],
-    comments: [
-      { text: "复习优先于新卡，这条救了我的调度", likes: 1103, author: "烤鸭人" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n8", type: "normal", title: "和领导 1v1 怎么汇报：结构化模板与三个禁忌",
-    author: "职场观察员K", url: "https://www.xiaohongshu.com/explore/n8",
-    published_at: "2026-08-25", collected_at: "2026-08-26", liked: 14205,
-    category: "职场", subcategory: "向上管理", tags: ["汇报", "1v1", "沟通模板"], h: 1.05,
-    summary: "1v1 汇报用「结论 → 进展 → 卡点 → 需要支持」四段结构，全程 10 分钟内。卡点必须附带至少一个自己的方案选项，让领导做选择题而非问答题。三个禁忌：报喜不报忧、超时、把 1v1 当吐槽会。",
-    key_points: [
-      "四段模板：结论 30s / 进展 3min / 卡点 3min / 需要支持 2min",
-      "卡点永远带 2 个选项加自己的倾向，附代价说明",
-      "数字先行：进展用完成率与日期，不描述过程",
-    ],
-    ocr: ["图1：四段结构的一页纸模板"],
-    comments: [
-      { text: "带着选项去汇报之后，领导对我的态度明显变了", likes: 3521, author: "PM阿森", replies: [
-          { text: "选项一般准备几个比较合适", likes: 120, author: "实习生小k" },
-        ] },
-      { text: "补充：纪要 24 小时内发，留痕比说得好更重要", likes: 1688, author: "老陈" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n9", type: "normal", title: "家庭数据冷备：一套 NAS 加一块离线盘",
-    author: "数字仓鼠君", url: "https://www.xiaohongshu.com/explore/n9",
-    published_at: "2026-07-30", collected_at: "2026-08-02", liked: 5233,
-    category: "科技", subcategory: "家庭服务器", tags: ["NAS", "备份", "数据安全"], h: 1.35,
-    summary: "3-2-1 原则的家庭落地：NAS 做热数据与每天自动快照，重要档案约 200GB 每月手动拷到离线硬盘，另有一块 2.5 寸盘放公司做异地副本。勒索与误删场景都可恢复，年成本不到 ¥150。",
-    key_points: [
-      "热数据：NAS 快照每天自动保留 7 份，误删秒级回滚",
-      "冷数据：每月最后一个周末手动同步离线盘，写入后只读",
-      "异地副本用 2.5 寸盘放公司抽屉，防家庭级灾难",
-      "照片类再加一层按量付费云盘，比包年便宜",
-    ],
-    ocr: ["图2：目录结构与快照策略截图"],
-    comments: [
-      { text: "离线盘这条很多人忽略，勒索软件加密不了断电的盘", likes: 2003, author: "运维老张" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n10", type: "normal", title: "指数基金定投的止盈纪律：目标收益法实操",
-    author: "慢富实验室", url: "https://www.xiaohongshu.com/explore/n10",
-    published_at: "2026-08-10", collected_at: "2026-08-12", liked: 7410,
-    category: "理财", subcategory: "指数基金", tags: ["定投", "止盈", "指数基金"], h: 1.15,
-    summary: "宽基指数定投用目标收益法止盈：年化 15% 触发即分批卖出 1/3，落袋部分转入债基；回撤超过 20% 恢复定投并把金额上调 50%。纪律写在开始之前，涨跌时只执行不讨论。",
-    key_points: [
-      "止盈规则买入前锁定：年化 15% 分批卖 1/3",
-      "回撤 20% 以上恢复定投，金额上调 50%",
-      "纪律优先于判断，规则写进备忘录",
-    ],
-    ocr: ["图1：2015–2025 目标收益法回测净值曲线"],
-    comments: [
-      { text: "止盈后转债基这步很关键，不然钱又手痒进去了", likes: 1355, author: "小熊" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "n11", type: "video", title: "半马破 2 课表复盘：16 周从 2:18 到 1:58",
-    author: "跑步教练大白", url: "https://www.xiaohongshu.com/explore/n11",
-    published_at: "2026-08-05", collected_at: "2026-08-06", liked: 21003,
-    category: "运动", subcategory: "跑步训练", tags: ["半马", "跑步课表", "破二"], h: 1.3,
-    summary: "16 周分四阶段：基础期周跑量 35k 堆有氧 → 强化期加 800m×6 间歇 → 专项期马配长距离 → 减量比赛。核心是 80/20 强度分配与每周两次力量课防伤。（视频未转写，内容基于简介与评论）",
-    key_points: [
-      "80/20：八成轻松跑压心率 150 以下，两成高质量课",
-      "长距离每三周加 2k，赛前四周做到 16k 马配连续跑",
-      "每周两次下肢力量，伤病率比单纯堆跑量低一半",
-    ],
-    ocr: [],
-    comments: [
-      { text: "80/20 亲测有效，配速不降反升", likes: 2870, author: "runner_j" },
-      { text: "力量课视频在主页第 3 个，练保加利亚蹲", likes: 1104, author: "跟练的猫" },
-    ],
-    remark: "", attachments: [],
-  },
-  {
-    id: "s1", type: "synthesis", title: "合成 · 减脂备餐与训练安排",
-    sources: ["n1", "n11"], tags: ["减脂", "训练", "合成"], h: 1.18,
-    collected_at: "2026-09-04", liked: 0,
-    overview: "两篇笔记分别从饮食与训练侧给出减脂期框架：饮食靠热量缺口与高蛋白备餐控制摄入，训练靠 80/20 强度分配保住运动表现。合并后形成吃练一体的周计划骨架。",
-    common: [
-      "热量缺口控制在 300–500kcal，不靠极端节食（来源 1,2）",
-      "蛋白质优先：每餐 30g 起，训练日尤其重要（来源 1,2）",
-      "平台期先加运动量再谈砍热量（来源 1）",
-    ],
-    diff: [
-      "来源 1 主张缺口封顶 500kcal；来源 2 训练量提升会自然扩大消耗，叠加时需重算 TDEE",
-      "备餐安排在周日集中处理，训练课表周末有长距离课——建议备餐移到周六避免冲突",
-    ],
-    todo: [
-      "按备餐结构写下周清单，蛋白质备双份应对训练日",
-      "把 80/20 跑量表贴冰箱，轻松跑日正好安排为备餐日",
-      "每两周称重加拍体型照，平台期先加一次力量课",
-    ],
-  }
-);
+/* ═══ 数据层：API 封装（demo 假数据已移除，NOTES/INBOX 由服务端加载） ═══ */
+let NOTES = [];   // mapNote(服务端 index) 视图模型缓存
+let INBOX = [];   // mapInbox(服务端 inbox)
 
-const INBOX = [
-  {
-    id: "i1", captured_at: "今天 10:42", status: "pending",
-    raw: {
-      type: "normal", title: "鸡胸肉的 8 种做法：从腌制到火候全拆解",
-      desc: "柴是鸡胸最大的问题。这篇用盐水浸泡（brine）解决：5% 盐水泡 30 分钟保水……煎用中大火每面 2 分钟，静置 5 分钟再切。附 8 种腌制配方与热量对照表。",
-      author: "低卡厨房日记", liked_count: 8932, tags: ["鸡胸肉", "备餐", "高蛋白"],
-      comments: [{ text: "盐水泡完真的嫩很多", likes: 1200, author: "momo" }, { text: "求热量表原图", likes: 300, author: "cc" }],
-      source_url: "https://www.xiaohongshu.com/explore/ix1", cover: "美食",
-    },
-  },
-  {
-    id: "i2", captured_at: "今天 09:15", status: "pending",
-    raw: {
-      type: "video", title: "城市骑行装备清单（新手向）：这 5 件先买",
-      desc: "头盔、手套、前后灯、骑行裤、补胎工具，逐个讲为什么以及多少钱能入门。视频对比了三款百元级头盔的佩戴与散热……",
-      author: "城市骑行指南", liked_count: 4521, tags: ["骑行", "装备", "新手"],
-      comments: [{ text: "前后灯建议直接买 200 档的，亮很多", likes: 800, author: "夜骑人" }],
-      source_url: "https://www.xiaohongshu.com/explore/ix2", cover: "运动",
-    },
-  },
-  {
-    id: "i3", captured_at: "昨天 22:07", status: "pending",
-    raw: {
-      type: "normal", title: "读完《纳瓦尔宝典》后我在做的 10 件事",
-      desc: "把「特定知识」「杠杆」「长期主义」落到日常：每天一小时深度学习区、把重复工作模板化、用写作积累声誉杠杆……附模板截图。",
-      author: "阅读拆解员", liked_count: 15870, tags: ["读书笔记", "认知", "杠杆"],
-      comments: [{ text: "特定知识那段解释得比原书清楚", likes: 2400, author: "读者小鹿" }],
-      source_url: "https://www.xiaohongshu.com/explore/ix3", cover: "学习",
-    },
-  },
-];
+async function api(path, opts = {}) {
+  const init = { headers: {} };
+  if (opts.method) init.method = opts.method;
+  if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  const r = await fetch("/api" + path, init);
+  if (r.status === 204) return null;
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || ("请求失败 " + r.status));
+  return j;
+}
+
+/* 瀑布流高度：按 note_id 稳定伪随机，刷新不跳动 */
+const hOf = (id) => 0.95 + (String(id).split("").reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) % 997, 7) % 56) / 100;
+
+/* 服务端 index 元数据 → 视图模型（详情字段由 openDetail 按需填充） */
+function mapNote(n) {
+  return {
+    id: n.note_id, type: n.type || "normal", title: n.title || "未命名", author: n.author || "",
+    url: n.url || ("https://www.xiaohongshu.com/explore/" + n.note_id),
+    published_at: (n.published_at || "").slice(0, 10), collected_at: (n.collected_at || "").slice(0, 10),
+    liked: n.liked_count || 0, category: n.category || "", subcategory: n.subcategory || "",
+    tags: n.tags || [], h: hOf(n.note_id), sources: n.sources || [],
+    summary: "", key_points: [], ocr: [], comments: [], remark: "", attachments: [],
+  };
+}
+const mapCm = (c) => ({ text: c.content, likes: c.likes || 0, author: c.author || "", op: false, replies: (c.replies || []).map(mapCm) });
+function mapInbox(it) {
+  return {
+    id: it.note_id, captured_at: (it.captured_at || "").replace("T", " ").slice(5, 16), status: it.status,
+    raw: { ...it.raw, comments: (it.raw.comments || []).map(mapCm) },
+  };
+}
+
+async function loadAll() {
+  const [notes, inbox] = await Promise.all([api("/notes"), api("/inbox")]);
+  NOTES.length = 0; NOTES.push(...notes.map(mapNote));
+  INBOX.length = 0; INBOX.push(...inbox.map(mapInbox));
+}
+
+/* 收件箱封面：按标签/标题关键词猜主题配色 */
+function covGuess(r) {
+  const hay = ((r.tags || []).join(" ") + " " + (r.title || "") + " " + (r.desc || ""));
+  const k = Object.keys(COV).find((c) => hay.includes(c));
+  return COV[k] || COV["学习"];
+}
+
+/* 评论 markdown（vault 区块）→ 结构化（服务端 renderCommentsMd 的逆） */
+function parseCommentsMd(md) {
+  if (!md || md === "（无）" || md === "（待 AI 整理）") return [];
+  const out = [];
+  for (const line of md.split("\n")) {
+    const m = line.match(/^(\s*)-\s「(.*)」—— 赞 (\d+) @(.*)$/);
+    if (!m) continue;
+    const c = { text: m[2], likes: +m[3], author: m[4], op: false, replies: [] };
+    if (m[1]) { const p = out[out.length - 1]; if (p) p.replies.push(c); }
+    else out.push(c);
+  }
+  return out;
+}
 
 /* ── 工具 ── */
 const $ = (s, el = document) => el.querySelector(s);
@@ -365,7 +156,7 @@ function renderSidebar() {
     .map(([t, c]) => `<button class="tag-pill${f.tag === t ? " active" : ""}" data-tag="${esc(t)}">${esc(t)} ${c}</button>`).join("");
 
   $("#synCount").textContent = NOTES.filter((n) => n.type === "synthesis").length;
-  $("#statInbox").textContent = INBOX.length;
+  $("#statInbox").textContent = INBOX.filter((x) => x.status === "pending").length;
   $("#statNotes").textContent = NOTES.length;
   const badge = $("#inboxBadge");
   badge.hidden = !INBOX.length;
@@ -484,7 +275,7 @@ function renderInbox() {
     <div class="inbox-stats">
       <div class="inbox-stats-item"><b>${pend.length}</b><span>待处理</span></div>
       <div class="inbox-stats-sep"></div>
-      <div class="inbox-stats-item"><b>0</b><span>失败</span></div>
+      <div class="inbox-stats-item"><b>${INBOX.filter((x) => x.status === "failed").length}</b><span>失败</span></div>
       <span class="inbox-stats-cost">◆ 预估 AI 成本 ¥${cost}</span>
       <div style="display:flex;gap:8px;margin-left:10px">
         <button class="btn btn-ai" id="btnConfirmAll" ${pend.length ? "" : "disabled"}>确认处理 ${pend.length} 条</button>
@@ -496,10 +287,12 @@ function renderInbox() {
 
   if (pend.length) {
     $("#btnConfirmAll").onclick = () => confirmItems(INBOX.filter((x) => x.status === "pending").map((x) => x.id));
-    $("#btnClearInbox").onclick = () => {
-      INBOX.length = 0;
-      renderInbox(); renderSidebar();
-      toast("已清空待处理条目", "info");
+    $("#btnClearInbox").onclick = async () => {
+      try {
+        await api("/inbox", { method: "DELETE" });
+        await loadAll(); renderInbox(); renderSidebar();
+        toast("已清空待处理条目", "info");
+      } catch (e) { toast(e.message || "清空失败", "err"); }
     };
   }
   $$(".inbox-card").forEach((el) => {
@@ -511,10 +304,12 @@ function renderInbox() {
     const id = b.closest(".inbox-card").dataset.id;
     if (b.dataset.act === "confirm") confirmItems([id]);
     if (b.dataset.act === "del") {
-      const idx = INBOX.findIndex((x) => x.id === id);
-      INBOX.splice(idx, 1);
-      renderInbox(); renderSidebar();
-      toast("已从收件箱删除");
+      api("/inbox/" + id, { method: "DELETE" }).then(() => {
+        const idx = INBOX.findIndex((x) => x.id === id);
+        if (idx >= 0) INBOX.splice(idx, 1);
+        renderInbox(); renderSidebar();
+        toast("已从收件箱删除");
+      }).catch((e) => toast(e.message || "删除失败", "err"));
     }
   });
 }
@@ -523,7 +318,7 @@ function inboxCard(it, i) {
   const r = it.raw;
   const stMap = { pending: ["待处理", ""], processing: ["处理中", "proc"], done: ["已入库", "ok"], failed: ["失败", "fail"] };
   const [stTxt, stCls] = stMap[it.status] || stMap.pending;
-  const cov = COV[r.cover] || COV["学习"];
+  const cov = covGuess(r);
   return `<div class="inbox-card" data-id="${it.id}" style="animation-delay:${i * 60}ms" tabindex="0" role="button">
     <div class="inbox-card-top">
       <div class="cover inbox-thumb" style="--cov:${cov[0]}"><span class="cover-emoji" style="font-size:24px">${cov[1]}</span></div>
@@ -557,10 +352,32 @@ function emptyInbox() {
     </div>
   </div>`;
 }
-/* ── 详情抽屉 ── */
-function openDetail(id) {
+/* ── 详情抽屉（按需拉取 vault 全文，合并进视图模型） ── */
+async function openDetail(id) {
   const n = NOTES.find((x) => x.id === id);
   if (!n) return;
+  if (!n.__loaded) {
+    try {
+      const d = await api("/notes/" + encodeURIComponent(id));
+      const s = d.sections || {};
+      n.summary = s.summary || n.summary;
+      n.key_points = s.points && s.points.length ? s.points : n.key_points;
+      n.bodyText = s.body || "";
+      n.ocr = s.ocr || [];
+      n.comments = parseCommentsMd(s.commentsMd || "");
+      n.remark = s.remark && s.remark !== "（空）" ? s.remark : "";
+      if (d.fm) {
+        n.category = d.fm.category || n.category;
+        n.subcategory = d.fm.subcategory || n.subcategory;
+        n.overview = s.overview || n.overview;
+        n.common = s.common || n.common;
+        n.diff = s.diff || n.diff;
+        n.todo = s.todo || n.todo;
+        n.remark = s.remark && s.remark !== "（空）" ? s.remark : (n.remark || "");
+      }
+      n.__loaded = true;
+    } catch (e) { toast(e.message || "详情加载失败", "err"); }
+  }
   const isSyn = n.type === "synthesis";
   const rel = isSyn ? [] : relateOf(n);
   const srcs = isSyn ? (n.sources || []).map((sid) => NOTES.find((x) => x.id === sid)).filter(Boolean) : [];
@@ -614,16 +431,24 @@ function openDetail(id) {
   $("#remarkArea").oninput = (e) => {
     n.remark = e.target.value;
     clearTimeout(t);
-    t = setTimeout(() => toast("备注已保存到 vault"), 700);
+    t = setTimeout(() => {
+      api("/notes/" + encodeURIComponent(id) + "/section", { method: "PATCH", body: { key: "remark", content: n.remark } })
+        .then(() => toast("备注已保存到 vault"))
+        .catch((e2) => toast(e2.message || "保存失败", "err"));
+    }, 700);
   };
   $("#btnReprocess").onclick = () => {
-    toast("已重新提交 AI 打标（演示）", "info");
+    toast("重新打标将在接入 AI 管线后开放（M4）", "info");
   };
   $("#btnDelNote").onclick = () => {
-    NOTES.splice(NOTES.findIndex((x) => x.id === id), 1);
-    closeDetail(); renderSidebar();
-    App.view === "library" && renderLibrary();
-    toast("笔记已删除，孤立附件已清理");
+    if (!confirm(`删除《${n.title}》？\n将同时清理其附件，操作不可恢复。`)) return;
+    api("/notes/" + encodeURIComponent(id), { method: "DELETE" }).then(() => {
+      const i = NOTES.findIndex((x) => x.id === id);
+      if (i >= 0) NOTES.splice(i, 1);
+      closeDetail(); renderSidebar();
+      App.view === "library" && renderLibrary();
+      toast("笔记已删除，附件已清理");
+    }).catch((e) => toast(e.message || "删除失败", "err"));
   };
   $$(".rel-card", $("#drawerDetail")).forEach((c) => c.onclick = () => openDetail(c.dataset.id));
   $$(".src-item", $("#drawerDetail")).forEach((c) => c.onclick = () => { closeDetail(); setTimeout(() => openDetail(c.dataset.id), 120); });
@@ -708,7 +533,7 @@ function closeDetail() {
 function openPreview(id) {
   const it = INBOX.find((x) => x.id === id);
   const r = it.raw;
-  const cov = COV[r.cover] || COV["学习"];
+  const cov = covGuess(r);
   $("#modalBox").innerHTML = `
     <div class="modal-head"><h3>捕获预览</h3><span style="font-size:11px;color:var(--ink3)">POST /api/capture · ${it.captured_at}</span><button class="close-x" data-close>×</button></div>
     <div class="modal-body">
@@ -718,7 +543,7 @@ function openPreview(id) {
         <div class="inbox-card-meta" style="margin-top:6px">@${esc(r.author)}<span class="dot"></span>♥ ${fmtK(r.liked_count)}<span class="dot"></span>${(r.tags || []).map((t) => "#" + esc(t)).join(" ")}</div></div>
       </div>
       <div class="sec sec--gray" style="margin-bottom:12px"><div class="sec-head"><h4>正文全文</h4></div><p>${esc(r.desc)}</p>
-        <p style="margin-top:8px;font-size:12px;color:var(--ink3)">共 3 张图片将下载原图并压缩至 attachments/。</p></div>
+        <p style="margin-top:8px;font-size:12px;color:var(--ink3)">${(r.image_urls || []).length} 张图片将随处理下载并压缩至 attachments/。</p></div>
       <div class="sec"><div class="sec-head"><h4>评论 ${(r.comments || []).length} 条</h4></div>
         <div style="display:flex;flex-direction:column;gap:8px">${(r.comments || []).map((c) => `
           <div class="comment-item"><span class="c-text">「${esc(c.text)}」</span><span class="c-meta"><span class="likes">♥ ${fmtK(c.likes)}</span></span>${replyHtml(c)}</div>`).join("") || "<p>未抓取到评论</p></div></div>"}
@@ -730,88 +555,80 @@ function openPreview(id) {
   $("#overlayModal").hidden = false;
   $("#pvConfirm").onclick = () => { closeModal(); confirmItems([id]); };
   $("#pvDel").onclick = () => {
-    INBOX.splice(INBOX.findIndex((x) => x.id === id), 1);
-    closeModal(); renderInbox(); renderSidebar(); toast("已删除");
+    api("/inbox/" + id, { method: "DELETE" }).then(() => {
+      const idx = INBOX.findIndex((x) => x.id === id);
+      if (idx >= 0) INBOX.splice(idx, 1);
+      closeModal(); renderInbox(); renderSidebar(); toast("已删除");
+    }).catch((e) => toast(e.message || "删除失败", "err"));
   };
 }
 function closeModal() { $("#overlayModal").hidden = true; $("#modalBox").innerHTML = ""; }
-/* ── AI 处理管线（模拟 §5.5 状态机） ── */
-function confirmItems(ids) {
-  const items = INBOX.filter((x) => ids.includes(x.id) && x.status === "pending");
-  items.forEach((it) => {
-    it.status = "processing";
-    App.queue.push({ id: it.id, raw: it.raw, stage: 0, failed: false });
-  });
-  items.forEach((it) => INBOX.splice(INBOX.indexOf(it), 1));
-  if (items.length) {
-    toast(`已提交 ${items.length} 条进入 AI 管线`, "info");
+/* ── AI 处理管线（§5.5 状态机 · 轮询服务端 /pipeline/status） ── */
+async function confirmItems(ids) {
+  const pend = INBOX.filter((x) => ids.includes(x.id) && x.status === "pending");
+  if (!pend.length) return;
+  try {
+    await api("/inbox/confirm", { method: "POST", body: { ids: pend.map((x) => x.id) } });
+    PIPE.expected = pend.length;
+    pend.forEach((x) => { const i = INBOX.indexOf(x); if (i >= 0) INBOX.splice(i, 1); });
+    toast(`已提交 ${pend.length} 条进入处理管线`, "info");
     if (App.view === "inbox") renderInbox();
     renderSidebar();
-    if (!PIPE.timer) runPipeline();
+    pollPipeline();
+  } catch (e) {
+    toast(e.message || "提交失败", "err");
   }
 }
 
-const PIPE = { timer: null };
+const PIPE = { timer: null, expected: 0 };
 
-function runPipeline() {
-  PIPE.timer = setInterval(() => {
-    const cur = App.queue.find((q) => !q.failed && q.stage < STAGES.length);
-    if (!cur) {
-      const allDone = App.queue.every((q) => q.stage >= STAGES.length);
-      if (allDone) {
-        clearInterval(PIPE.timer); PIPE.timer = null;
-        $("#pipelineLabel").textContent = "处理完成";
-        $("#pipelineCount").textContent = `${App.queue.length}/${App.queue.length}`;
-        setTimeout(() => { App.queue = []; hidePipeline(); }, 1600);
-      }
+/* 轮询管线状态：条目从服务端 queue 消失即已完成（成功后移出收件箱，失败保留断点） */
+function pollPipeline() {
+  if (PIPE.timer) return;
+  $("#pipelineBar").hidden = false;
+  PIPE.timer = setInterval(async () => {
+    let st;
+    try { st = await api("/pipeline/status"); } catch (e) { return; }
+    App.sessionCost = st.sessionCost || App.sessionCost;
+    const q = st.queue || [];
+    if (!q.length && !PIPE.expected) return;
+    if (!q.length) {
+      clearInterval(PIPE.timer); PIPE.timer = null; PIPE.expected = 0;
+      $("#pipelineLabel").textContent = "处理完成";
+      $("#pipelineCount").textContent = "";
+      setTimeout(async () => {
+        await loadAll();
+        if (App.view === "library") renderLibrary();
+        if (App.view === "inbox") renderInbox();
+        renderSidebar();
+        hidePipeline();
+        toast("管线处理完成，笔记库已刷新", "ok");
+      }, 800);
       return;
     }
-    cur.stage++;
-    App.sessionCost += COST;
-    if (cur.stage >= STAGES.length) finishNote(cur);
-    renderPipeline();
-  }, 1400);
+    renderPipeline(q);
+  }, 1200);
 }
 
-function finishNote(q) {
-  const r = q.raw;
-  const SUBMAP = { "美食": "家常菜谱", "运动": "装备入门", "学习": "读书笔记" };
-  const note = {
-    id: uid("n"), type: r.type, title: r.title, author: r.author, url: r.source_url,
-    published_at: "2026-09-07", collected_at: "2026-09-07", liked: r.liked_count || 0,
-    category: r.cover || "其他", subcategory: SUBMAP[r.cover] || "收藏整理", tags: r.tags || [], h: 1.1 + Math.random() * 0.4,
-    summary: "AI 已完成摘要与两级打标（演示数据）：本条由收件箱确认后自动生成，视觉模型完成了 OCR 与要点提取，原文与图片已落盘 vault。",
-    key_points: [
-      "AI 整理完成：摘要、两级分类、标签、评论洞察已写入 frontmatter",
-      "原文不可变：AI 内容与原帖正文严格分区",
-    ],
-    ocr: [], comments: r.comments || [], remark: "", attachments: [],
-  };
-  NOTES.unshift(note);
-  renderSidebar();
-  if (App.view === "library") renderLibrary();
-  toast(`《${r.title.slice(0, 14)}…》已入库`);
-}
-
-function renderPipeline() {
+/* 服务端 stage → 4 点进度映射（writing 为 M3 主阶段，M4 细化） */
+function renderPipeline(q) {
   const bar = $("#pipelineBar");
-  const active = App.queue.length > 0;
-  bar.hidden = !active;
-  if (!active) return;
-  const total = App.queue.length;
-  const done = App.queue.filter((q) => q.stage >= STAGES.length).length;
-  $("#pipelineLabel").textContent = done >= total && total ? "处理完成" : "AI 处理中";
+  bar.hidden = false;
+  const total = q.length;
+  const done = q.filter((x) => x.status === "done" || x.status === "skipped").length;
+  $("#pipelineLabel").textContent = done >= total ? "处理完成" : "AI 处理中";
   $("#pipelineCount").textContent = `${done}/${total}`;
-  $("#pipelinePanel").innerHTML = App.queue.map((q) => {
-    const st = Math.min(q.stage, STAGES.length);
+  $("#pipelinePanel").innerHTML = q.map((x) => {
+    const stageIdx = x.status === "done" || x.status === "skipped" ? STAGES.length : (x.status === "processing" ? 3 : 2);
+    const title = (INBOX.find((i) => i.id === x.note_id) || {}).title;
     return `<div class="pl-item">
-      <span class="pl-title">${esc(q.raw.title)}</span>
-      <span class="pl-stage">${STAGES.map((s, i) => `<i class="${i < st ? (q.stage >= STAGES.length ? "ok" : "on") : ""}" title="${s}"></i>`).join("")}</span>
-      <span style="font-size:11px;color:${q.stage >= STAGES.length ? "var(--ok)" : "var(--red)"};min-width:52px;text-align:right">${q.stage >= STAGES.length ? "完成 ✓" : STAGES[st]}</span>
+      <span class="pl-title">${esc(title || x.note_id)}</span>
+      <span class="pl-stage">${STAGES.map((s, i) => `<i class="${i < stageIdx ? (stageIdx >= STAGES.length ? "ok" : "on") : ""}" title="${s}"></i>`).join("")}</span>
+      <span style="font-size:11px;color:${stageIdx >= STAGES.length ? "var(--ok)" : x.status === "failed" ? "var(--red)" : "var(--ink2)"};min-width:52px;text-align:right">${x.status === "failed" ? "失败 ↺" : stageIdx >= STAGES.length ? "完成 ✓" : STAGES[stageIdx]}</span>
     </div>`;
   }).join("");
 }
-function hidePipeline() { if (!App.queue.length) { $("#pipelineBar").hidden = true; $("#pipelineBar").classList.remove("open"); $("#pipelinePanel").hidden = true; } }
+function hidePipeline() { $("#pipelineBar").hidden = true; $("#pipelineBar").classList.remove("open"); $("#pipelinePanel").hidden = true; }
 
 /* ── 多选浮栏 & 合成 ── */
 function updateSelectBar() {
@@ -890,7 +707,7 @@ function buildSynNote(sel, theme) {
   const titles = sel.map((s) => s.title);
   const srcIdx = (i) => `（来源 ${i + 1}）`;
   return {
-    id: uid("syn"), type: "synthesis",
+    id: uid("syn"), type: "synthesis", __loaded: true,
     title: "合成 · " + (theme || sel[0].category && `「${sel[0].category}」主题整理` || "跨主题整理"),
     sources: sel.map((s) => s.id), tags: ["AI合成", ...(theme ? [theme.slice(0, 6)] : [])], h: 1.2,
     collected_at: "2026-09-07", liked: 0,
@@ -975,7 +792,7 @@ function route() {
   renderSidebar();
 }
 
-function init() {
+async function boot() {
   window.addEventListener("hashchange", route);
 
   $("#btnSettings").onclick = openSettings;
@@ -1092,7 +909,13 @@ function init() {
     }
   });
 
+  /* 首屏：先加载服务端数据再渲染路由 */
+  try {
+    await loadAll();
+  } catch (e) {
+    toast("服务未启动或不可达：请先运行 npm start（127.0.0.1:3789）", "err");
+  }
   route();
 }
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", boot);
 
