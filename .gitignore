@@ -1,0 +1,32 @@
+# ===== 敏感信息（绝不提交） =====
+.env
+.env.*
+*.pem
+*.key
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+
+# ===== 日志 =====
+*.log
+
+# ===== Python =====
+__pycache__/
+*.pyc
+.venv/
+
+# ===== Node.js =====
+node_modules/
+dist/
+build/
+
+# ===== 本地临时目录 =====
+.codebuddy/
+tmp/
