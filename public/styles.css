@@ -226,6 +226,21 @@ b{font-weight:600}
 .detail-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:10px 0 4px;color:var(--ink3);font-size:12px}
 .detail-meta .dot{width:3px;height:3px;border-radius:50%;background:var(--line2)}
 .src-btn{display:inline-flex;align-items:center;gap:5px;color:var(--red);font-size:12px;font-weight:500;padding:3px 10px;border-radius:var(--r-chip);background:var(--red-soft);transition:background .15s}
+
+/* ── 溯源链接状态徽标（检测中呼吸动画；ok=绿 / dead=品牌红 / err·none=灰弱化） ── */
+.link-badge{display:inline-flex;align-items:center;font-size:11px;font-weight:500;padding:3px 9px;border-radius:var(--r-chip);color:var(--ink3);background:var(--chip);animation:badgePulse 1.5s ease-in-out infinite;white-space:nowrap}
+.link-badge.ok{color:var(--ok);background:rgba(14,159,110,.12);animation:none}
+.link-badge.dead{color:var(--red);background:var(--red-soft);animation:none}
+.link-badge.err{color:var(--err);background:rgba(239,68,68,.12);animation:none;cursor:pointer}
+.link-badge.none{color:var(--ink3);background:var(--chip);animation:none}
+@keyframes badgePulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* 过期引导条（浅红底，三步重扫 + 「仍要打开」逃生口） */
+.link-guide{margin:10px 0 2px;padding:10px 14px;border-radius:12px;background:var(--red-soft);border:1px solid rgba(255,36,66,.22);color:var(--ink2);font-size:12px;line-height:1.75}
+.link-guide b{color:var(--red)}
+.link-guide .lg-steps{display:block}
+.link-guide code{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:rgba(255,36,66,.08);padding:1px 5px;border-radius:4px}
+.link-guide .lg-open{display:inline-block;margin-top:5px;color:var(--red);font-weight:600;text-decoration:underline}
 .src-btn:hover{background:var(--red-soft)}
 .src-btn svg{width:11px;height:11px}
 .detail-chips{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 18px}

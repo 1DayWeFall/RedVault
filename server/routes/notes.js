@@ -7,6 +7,15 @@ const fs = require('fs');
 const path = require('path');
 const { readSection } = require('../services/vault');
 const { runAi } = require('../services/pipeline');
+const { probeSource } = require('../services/fetch-note');
+const { vaultTokenOf } = require('../lib/source-link');
+
+/** 溯源链接探测缓存（模块级单例）：键 = noteId:token——重扫换 token 即换键自动重探；
+ *  TTL 按状态分级：alive 10min / expired·deleted 1h（不自愈）/ error 30s（允许重试）；
+ *  in-flight Map 去重并发；上限 500 条 FIFO 淘汰（防长会话膨胀） */
+const LINK_TTL = { alive: 10 * 60e3, expired: 60 * 60e3, deleted: 60 * 60e3, error: 30e3 };
+const linkCache = new Map();     // key → {status, message, at}
+const linkInflight = new Map();  // key → Promise<entry>
 
 /** 允许前端编辑的区块白名单（不含 frontmatter 关联区块） */
 const EDITABLE_SECTIONS = new Set(['summary', 'points', 'body', 'ocr', 'comments', 'related', 'attachments', 'remark']);
@@ -73,6 +82,49 @@ module.exports = function notesRoutes(ctx) {
     } catch (e) {
       next(e.code ? e : { status: 500, message: e.message });
     }
+  });
+
+  /* 溯源链接活性探测（详情抽屉惰性单篇触发；列表页禁用，防批量探测触发风控）：
+   *  库内无 token → no_token 零网络；有 token → probeSource 同款判定（302 登录页→
+   *  expired / 内容缺失→deleted / 风控网络→error / 其余→alive），结果只进内存缓存 */
+  router.get('/notes/:id/link-status', async (req, res, next) => {
+    try {
+      const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
+      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      const noteId = req.params.id;
+
+      const stored = vaultTokenOf(ctx, noteId);
+      if (!stored || !stored.token) {
+        return res.json({
+          note_id: noteId, status: 'no_token',
+          message: '库内链接未带 xsec_token，重扫收藏夹可补全', checked_at: new Date().toISOString()
+        });
+      }
+
+      const key = `${noteId}:${stored.token}`;
+      const hit = req.query.refresh === '1' ? null : linkCache.get(key);
+      if (hit && Date.now() - hit.at < (LINK_TTL[hit.status] || 60e3)) {
+        return res.json({ note_id: noteId, ...hit, cached: true });
+      }
+
+      let p = linkInflight.get(key);
+      if (!p) {
+        p = (async () => {
+          const r = await probeSource(noteId, stored.token);
+          const status = r.ok ? 'alive'
+            : r.reason === 'token_expired' ? 'expired'
+            : r.reason === 'incomplete' ? 'deleted'
+            : 'error';
+          const entry = { status, message: r.ok ? '链接有效，可直接打开' : r.message, at: Date.now() };
+          if (linkCache.size >= 500) linkCache.delete(linkCache.keys().next().value); /* FIFO 淘汰最老 */
+          linkCache.set(key, entry);
+          return entry;
+        })().finally(() => linkInflight.delete(key));
+        linkInflight.set(key, p);
+      }
+      const entry = await p;
+      res.json({ note_id: noteId, ...entry });
+    } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
   });
 
   /* 区块编辑（锚点替换，只动目标区块 §5.6） */

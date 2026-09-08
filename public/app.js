@@ -448,7 +448,8 @@ async function openDetail(id) {
             <span>♥ ${fmtK(n.liked)}</span>
             <a class="src-btn" href="${esc(n.url)}" target="_blank" rel="noopener" title="链接由小红书授权，约数天有效；若打开显示扫码/登录页：在小红书重扫一次收藏夹即可刷新全部链接">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-              溯源原帖</a>`}
+              溯源原帖</a>
+              <span class="link-badge" id="linkBadge" data-note="${esc(id)}" title="实时探测小红书原帖链接死活">检测中…</span>`}
         </div>
         <div class="detail-chips">
           ${isSyn ? `<span class="chip-cat cat">◆ AI 合成</span>` : `
@@ -547,6 +548,68 @@ async function openDetail(id) {
     };
     inp.click();
   });
+
+  /* 溯源链接：惰性检测徽标 + 过期点击拦截（合成笔记无溯源） */
+  if (!isSyn) {
+    const drawer = $("#drawerDetail");
+    const badge = $("#linkBadge");
+    const srcBtn = drawer && drawer.querySelector(".src-btn");
+    if (badge) {
+      probeLinkBadge(id, n);
+      badge.onclick = () => badge.dataset.status === "error" && probeLinkBadge(id, n, true);
+    }
+    if (srcBtn) srcBtn.onclick = (ev) => {
+      if (badge && badge.dataset.status === "expired") { ev.preventDefault(); showLinkGuide(n); }
+    };
+  }
+}
+
+/* ── 溯源链接状态检测（单篇惰性，结果服务端缓存） ─────────────────── */
+const LINK_BADGE = {
+  checking: { cls: "",      text: "检测中…" },
+  alive:    { cls: "ok",    text: "链接有效" },
+  expired:  { cls: "dead",  text: "链接已过期" },
+  deleted:  { cls: "dead",  text: "原帖可能已删除" },
+  error:    { cls: "err",   text: "检测失败 · 点击重试" },
+  no_token: { cls: "none",  text: "未带令牌" }
+};
+
+async function probeLinkBadge(id, n, refresh = false) {
+  const badge = $("#linkBadge");
+  if (!badge || badge.dataset.note !== id) return;
+  try {
+    const j = await api(`/notes/${encodeURIComponent(id)}/link-status${refresh ? "?refresh=1" : ""}`);
+    if (!badge.isConnected || badge.dataset.note !== id) return;   /* 抽屉已关/切到别的笔记 */
+    const b = LINK_BADGE[j.status] || LINK_BADGE.error;
+    badge.dataset.status = j.status;
+    badge.className = "link-badge " + b.cls;
+    badge.textContent = b.text;
+    badge.title = j.message || b.text;
+  } catch (e) {
+    if (!badge.isConnected || badge.dataset.note !== id) return;
+    badge.dataset.status = "error";
+    badge.className = "link-badge err";
+    badge.textContent = "检测失败 · 点击重试";
+    badge.title = e.message || "探测请求失败";
+  }
+}
+
+/* 过期引导条：三步重扫续期 + 「仍要打开」逃生口（提示而非阻断） */
+function showLinkGuide(n) {
+  const drawer = $("#drawerDetail");
+  if (!drawer || $("#linkGuide")) return;
+  const chips = drawer.querySelector(".detail-chips");
+  const div = document.createElement("div");
+  div.id = "linkGuide";
+  div.className = "link-guide";
+  div.innerHTML = `
+    <b>溯源链接已过期</b>——小红书访问令牌约数天失效，属正常现象；正文与图片已本地化，不受影响。重扫一次收藏夹即可批量刷新全部链接：
+    <span class="lg-steps">① 在 Tampermonkey 中覆盖安装 RedVault 目录下 <code>userscript/xhs_capture.user.js</code>（v0.4.2+）</span>
+    <span class="lg-steps">② 打开小红书网页版「我的收藏」</span>
+    <span class="lg-steps">③ 在 RedVault 面板点「开始批量抓取」，出现「链接刷新 N」即完成</span>
+    <a href="#" class="lg-open">仍要打开原帖 ↗</a>`;
+  div.querySelector(".lg-open").onclick = (ev) => { ev.preventDefault(); window.open(n.url, "_blank", "noopener"); };
+  chips ? chips.before(div) : drawer.querySelector(".detail-head").append(div);
 }
 
 function li(items) { return items.map((x) => `<li>${esc(x)}</li>`).join(""); }

@@ -18,6 +18,7 @@
 const express = require('express');
 const { normalizeCapture, toInt } = require('../lib/capture-normalize');
 const { fetchNoteDetail, exploreUrl, sleep } = require('../services/fetch-note');
+const { vaultTokenOf } = require('../lib/source-link');
 
 module.exports = function captureRoutes(ctx) {
   const router = express.Router();
@@ -213,22 +214,6 @@ function classifyNote(ctx, noteId) {
   const existing = ctx.store.readInbox().find((x) => x.note_id === noteId);
   if (!existing) return 'new';
   return existing.status === 'failed' ? 'refeed' : 'known';
-}
-
-/** 已入库笔记的库内溯源 token（check/list 共用）：
- *  返回 { file, token }——token 从 frontmatter url 的 xsec_token 参数解码比对；
- *  url 无 token 或文件读取失败 → token 为 null（视为可刷新）；未入库 → null */
-function vaultTokenOf(ctx, noteId) {
-  if (!ctx.vault) return null;
-  const meta = ctx.store.readIndex().notes.find((n) => n.note_id === noteId);
-  if (!meta) return null;
-  let token = null;
-  try {
-    const { fm } = ctx.vault.readNoteFile(meta.file);
-    const m = /[?&]xsec_token=([^&\s]+)/.exec(String(fm.url || ''));
-    if (m) { try { token = decodeURIComponent(m[1]); } catch { token = m[1]; } }
-  } catch { /* 文件损坏/缺失 → 视为可刷新 */ }
-  return { file: meta.file, token };
 }
 
 /** 详情抓取失败时的兜底 raw：保留清单信息 + xsec_token 溯源，供收件箱查看/删除/重采 */

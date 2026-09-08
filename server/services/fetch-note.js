@@ -161,7 +161,9 @@ async function fetchText(url, timeoutMs = 15000) {
  *   失败 reason ∈ token_expired / risk / network / http_<status> / incomplete / invalid，
  *   message 为可直接写入收件箱展示的中文原因（含修复建议）。
  */
-async function fetchNoteDetail(noteId, xsecToken) {
+/** 抓取+解析共享核（fetchNoteDetail / probeSource 共用同一套判定，避免复制粘贴）：
+ *  成功 {ok:true, note}；失败 {ok:false, reason, message} */
+async function fetchNoteCore(noteId, xsecToken) {
   const bad = (reason, message) => ({ ok: false, reason, message });
   if (!noteId || !xsecToken) return bad('invalid', '缺少 note_id / xsec_token');
 
@@ -185,6 +187,24 @@ async function fetchNoteDetail(noteId, xsecToken) {
     || Object.values(map).map((v) => v && v.note).find(Boolean)
     || null;
   if (!note || (!note.title && !note.desc)) return bad('incomplete', '详情内容缺失（无标题且无正文），笔记可能已删除或不可见');
+  return { ok: true, note };
+}
+
+/**
+ * 抓取单条笔记详情。
+ * @param {string} noteId
+ * @param {string} xsecToken
+ * @returns {Promise<{ok:true, note:object, subtitle:{text,lang}|null}
+ *               | {ok:false, reason:string, message:string}>}
+ *   ok 时 note 为 __INITIAL_STATE__ 原始 note（title/desc/user/interactInfo/imageList/
+ *   video/tagList/time），可直接喂 normalizeCapture；
+ *   失败 reason ∈ token_expired / risk / network / http_<status> / incomplete / invalid，
+ *   message 为可直接写入收件箱展示的中文原因（含修复建议）。
+ */
+async function fetchNoteDetail(noteId, xsecToken) {
+  const r = await fetchNoteCore(noteId, xsecToken);
+  if (!r.ok) return r;
+  const { note } = r;
 
   /* 字幕 URL 带签名会过期，此刻立即下载；失败静默降级（正文照常） */
   let subtitle = null;
@@ -198,4 +218,15 @@ async function fetchNoteDetail(noteId, xsecToken) {
   return { ok: true, note, subtitle };
 }
 
-module.exports = { fetchNoteDetail, exploreUrl, extractInitialState, pickSubtitleUrl, parseSrt, sleep };
+/**
+ * 轻量探测溯源链接死活（GET /notes/:id/link-status 专用）：
+ * 与 fetchNoteDetail 完全同一套判定（302 登录页→过期 / 风控码 / 内容缺失），
+ * 唯一差异是拿到结果即返回、不下载字幕（探测零额外带宽）。
+ * @returns {Promise<{ok:true} | {ok:false, reason:string, message:string}>}
+ */
+async function probeSource(noteId, xsecToken) {
+  const r = await fetchNoteCore(noteId, xsecToken);
+  return r.ok ? { ok: true } : r;
+}
+
+module.exports = { fetchNoteDetail, probeSource, exploreUrl, extractInitialState, pickSubtitleUrl, parseSrt, sleep };
