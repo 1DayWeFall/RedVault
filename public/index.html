@@ -98,12 +98,18 @@
 <!-- ══════════ 多选操作浮栏 ══════════ -->
 <div class="select-bar" id="selectBar" hidden>
   <button class="ghost-btn" id="btnCancelSelect">取消</button>
-  <span class="select-bar-info">已选 <b id="selectCount">0</b> 篇</span>
+  <span class="select-bar-info">已选 <b id="selectCount">0</b> 项</span>
   <button class="ai-btn" id="btnOpenSynthesize">
     <span class="ai-spark" aria-hidden="true">◆</span>
     AI 合成主题笔记
     <span class="select-bar-cost" id="selectCost">≈ ¥0.03</span>
   </button>
+  <button class="ai-btn" id="btnBatchConfirm" hidden>
+    <span class="ai-spark" aria-hidden="true">◆</span>
+    批量确认处理
+    <span class="select-bar-cost" id="batchCost">≈ ¥0.00</span>
+  </button>
+  <button class="ghost-btn" id="btnBatchDelete" hidden>批量删除</button>
 </div>
 
 <!-- ══════════ 弹窗层 ══════════ -->

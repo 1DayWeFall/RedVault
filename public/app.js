@@ -266,25 +266,37 @@ function renderLibrary() {
 /* ── 收件箱视图 ── */
 function renderInbox() {
   const pend = INBOX.filter((x) => x.status === "pending");
+  const failN = INBOX.filter((x) => x.status === "failed").length;
   const cost = (pend.length * COST).toFixed(2);
   $("#content").innerHTML = INBOX.length ? `
     <div class="view-head">
       <div><div class="view-title">收件箱</div></div>
       <span class="view-sub">油猴脚本捕获的原始内容，确认后才消耗 AI 额度</span>
+      <div class="view-head-actions">
+        <button class="btn ${App.selectMode ? "btn-red" : "btn-ghost"}" id="btnSelectMode">${App.selectMode ? "退出多选" : "多选"}</button>
+      </div>
     </div>
     <div class="inbox-stats">
       <div class="inbox-stats-item"><b>${pend.length}</b><span>待处理</span></div>
       <div class="inbox-stats-sep"></div>
-      <div class="inbox-stats-item"><b>${INBOX.filter((x) => x.status === "failed").length}</b><span>失败</span></div>
+      <div class="inbox-stats-item"><b>${failN}</b><span>失败</span></div>
       <span class="inbox-stats-cost">◆ 预估 AI 成本 ¥${cost}</span>
       <div style="display:flex;gap:8px;margin-left:10px">
         <button class="btn btn-ai" id="btnConfirmAll" ${pend.length ? "" : "disabled"}>确认处理 ${pend.length} 条</button>
         <button class="btn btn-ghost" id="btnClearInbox" ${pend.length ? "" : "disabled"}>清空待处理</button>
+        <button class="btn btn-ghost" id="btnClearFailed" ${failN ? "" : "disabled"}>清空失败${failN ? ` ${failN} 条` : ""}</button>
       </div>
     </div>
     <div class="inbox-list">${INBOX.map((it, i) => inboxCard(it, i)).join("")}</div>
   ` : emptyInbox();
 
+  $("#content").classList.toggle("selecting", App.selectMode);
+  const btnSel = $("#btnSelectMode");
+  if (btnSel) btnSel.onclick = () => {
+    App.selectMode = !App.selectMode;
+    if (!App.selectMode) App.selected.clear();
+    renderInbox(); updateSelectBar();
+  };
   if (pend.length) {
     $("#btnConfirmAll").onclick = () => confirmItems(INBOX.filter((x) => x.status === "pending").map((x) => x.id));
     $("#btnClearInbox").onclick = async () => {
@@ -295,9 +307,27 @@ function renderInbox() {
       } catch (e) { toast(e.message || "清空失败", "err"); }
     };
   }
+  if (failN) {
+    $("#btnClearFailed").onclick = async () => {
+      try {
+        const r = await api("/inbox?scope=failed", { method: "DELETE" });
+        await loadAll(); renderInbox(); renderSidebar();
+        toast(`已清空 ${r.removed} 条失败条目`, "info");
+      } catch (e) { toast(e.message || "清空失败", "err"); }
+    };
+  }
   $$(".inbox-card").forEach((el) => {
-    el.onclick = (e) => { if (e.target.closest(".mini-btn")) return; openPreview(el.dataset.id); };
-    el.onkeydown = (e) => { if (e.key === "Enter") openPreview(el.dataset.id); };
+    el.onclick = (e) => {
+      if (e.target.closest(".mini-btn")) return;
+      if (App.selectMode) {
+        /* 局部更新选中态，避免整列表重绘抖动（同笔记库） */
+        const id = el.dataset.id;
+        if (App.selected.has(id)) { App.selected.delete(id); el.classList.remove("selected"); }
+        else { App.selected.add(id); el.classList.add("selected"); }
+        updateSelectBar();
+      } else openPreview(el.dataset.id);
+    };
+    el.onkeydown = (e) => { if (e.key === "Enter") el.click(); };
   });
   $$(".mini-btn[data-act]").forEach((b) => b.onclick = (e) => {
     e.stopPropagation();
@@ -319,7 +349,8 @@ function inboxCard(it, i) {
   const stMap = { pending: ["待处理", ""], processing: ["处理中", "proc"], done: ["已入库", "ok"], failed: ["失败", "fail"] };
   const [stTxt, stCls] = stMap[it.status] || stMap.pending;
   const cov = covGuess(r);
-  return `<div class="inbox-card" data-id="${it.id}" style="animation-delay:${i * 60}ms" tabindex="0" role="button">
+  return `<div class="inbox-card${App.selected.has(it.id) ? " selected" : ""}" data-id="${it.id}" style="animation-delay:${i * 60}ms" tabindex="0" role="button">
+    <span class="cover-check" aria-hidden="true">✓</span>
     <div class="inbox-card-top">
       <div class="cover inbox-thumb" style="--cov:${cov[0]}"><span class="cover-emoji" style="font-size:24px">${cov[1]}</span></div>
       <div style="min-width:0;flex:1">
@@ -328,6 +359,7 @@ function inboxCard(it, i) {
       </div>
     </div>
     <div class="inbox-card-desc">${esc(r.desc.slice(0, 90))}${r.desc.length > 90 ? "…" : ""}</div>
+    ${it.status === "failed" && it.process?.error ? `<div class="inbox-card-err">${esc(it.process.error)}</div>` : ""}
     <div class="inbox-card-foot">
       <span class="inbox-state ${stCls}"><span class="st-dot"></span>${stTxt}</span>
       <span style="color:var(--ink3);font-size:11px">${(r.comments || []).length} 条评论</span>
@@ -659,7 +691,44 @@ function updateSelectBar() {
   const bar = $("#selectBar");
   bar.hidden = !(App.selectMode && App.selected.size > 0);
   $("#selectCount").textContent = App.selected.size;
-  $("#selectCost").textContent = `≈ ¥${(App.selected.size * 0.015 + 0.02).toFixed(2)}`;
+  const lib = App.view === "library";
+  $("#btnOpenSynthesize").hidden = !lib;
+  $("#btnBatchConfirm").hidden = lib;
+  $("#btnBatchDelete").hidden = lib;
+  if (lib) {
+    $("#selectCost").textContent = `≈ ¥${(App.selected.size * 0.015 + 0.02).toFixed(2)}`;
+  } else {
+    const pend = INBOX.filter((x) => App.selected.has(x.id) && x.status === "pending").length;
+    $("#batchCost").textContent = `≈ ¥${(pend * COST).toFixed(2)}`;
+    $("#btnBatchConfirm").disabled = !pend;
+  }
+}
+
+/* ── 收件箱批量操作（多选浮栏按钮） ── */
+function batchConfirmSelected() {
+  const ids = [...App.selected];
+  const pend = INBOX.filter((x) => ids.includes(x.id) && x.status === "pending");
+  if (!pend.length) { toast("选中项中没有待处理条目", "err"); return; }
+  const skipped = ids.length - pend.length;
+  App.selected.clear(); updateSelectBar();
+  confirmItems(pend.map((x) => x.id));
+  if (skipped > 0) toast(`已跳过 ${skipped} 条非待处理条目`, "info");
+}
+
+async function batchDeleteSelected() {
+  const sel = [...App.selected];
+  const items = sel.map((id) => INBOX.find((x) => x.id === id)).filter(Boolean);
+  const del = items.filter((x) => x.status !== "processing");
+  const proc = items.length - del.length;
+  if (!del.length) { toast("选中条目均在处理中，暂不能删除", "err"); return; }
+  if (!confirm(`删除选中的 ${del.length} 条收件箱条目？`)) return;
+  try {
+    const r = await api("/inbox?ids=" + encodeURIComponent(del.map((x) => x.id).join(",")), { method: "DELETE" });
+    await loadAll();
+    App.selected.clear(); updateSelectBar();
+    renderInbox(); renderSidebar();
+    toast(`已删除 ${r.removed} 条${proc ? `，跳过 ${proc} 条处理中` : ""}`);
+  } catch (e) { toast(e.message || "批量删除失败", "err"); }
 }
 
 function openSynthesize() {
@@ -732,6 +801,7 @@ function exitSelectMode() {
   App.selected.clear();
   updateSelectBar();
   if (App.view === "library") renderLibrary();
+  else if (App.view === "inbox") renderInbox();
 }
 
 /* ── 设置（接真实 /api/settings） ── */
@@ -882,6 +952,8 @@ function route() {
   const h = location.hash || "#/library";
   const [path, qs] = h.slice(2).split("?");
   App.view = path === "inbox" ? "inbox" : "library";
+  /* 切视图清空多选状态，避免两个视图选择集互相污染 */
+  if (App.selectMode) { App.selectMode = false; App.selected.clear(); updateSelectBar(); }
   $$("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === App.view));
   if (App.view === "library") {
     if (qs) {
@@ -954,6 +1026,8 @@ async function boot() {
   };
   $("#btnCancelSelect").onclick = exitSelectMode;
   $("#btnOpenSynthesize").onclick = openSynthesize;
+  $("#btnBatchConfirm").onclick = batchConfirmSelected;
+  $("#btnBatchDelete").onclick = batchDeleteSelected;
   $("#sideSynthesis").onclick = () => {
     App.filter = { ...App.filter, type: "synthesis" };
     location.hash = "#/library";

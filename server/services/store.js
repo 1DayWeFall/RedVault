@@ -99,6 +99,13 @@ function createStore(dataDir) {
       this.saveInbox(items);
     },
 
+    /** 覆盖式写入：同 note_id 存在则整体替换，否则追加（单次写盘）。用于 failed 条目重采覆盖 */
+    upsertInboxEntry(entry) {
+      const items = this.readInbox().filter((x) => x.note_id !== entry.note_id);
+      items.push(entry);
+      this.saveInbox(items);
+    },
+
     updateInboxEntry(noteId, patch) {
       const items = this.readInbox();
       const i = items.findIndex((x) => x.note_id === noteId);
@@ -114,6 +121,16 @@ function createStore(dataDir) {
       if (next.length === items.length) return false;
       this.saveInbox(next);
       return true;
+    },
+
+    /** 批量删除收件箱条目（单次写盘，避免 N 条 = N 次全量写），返回实际删除数；不存在的 id 静默忽略 */
+    removeInboxEntries(ids) {
+      const set = new Set(ids);
+      const items = this.readInbox();
+      const next = items.filter((x) => !set.has(x.note_id));
+      const removed = items.length - next.length;
+      if (removed > 0) this.saveInbox(next);
+      return removed;
     },
 
     upsertIndexNote(note) {

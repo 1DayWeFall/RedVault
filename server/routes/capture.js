@@ -6,6 +6,8 @@
  * - POST /api/capture/list  收藏夹清单批量上报：油猴脚本只发清单（note_id + xsec_token），
  *                           服务端逐条用 xsec_token 抓详情页（限速 1.5~3s 随机抖动），
  *                           解析 __INITIAL_STATE__ 取正文/字幕/图片后判重入箱。
+ *                           收件箱 failed 条目豁免判重：重扫带新 token 自动重采覆盖；
+ *                           瞬时类失败（网络/风控/HTTP）自动补抓一次。
  * 鉴权 X-Capture-Token。
  */
 
@@ -70,7 +72,12 @@ module.exports = function captureRoutes(ctx) {
           continue;
         }
 
-        if (ctx.store.isDuplicate(noteId)) {
+        /* 判重：索引已有 → 跳过；收件箱非 failed → 跳过；
+           收件箱 failed → 豁免，视为重采（用新 xsec_token 重抓覆盖，重扫即愈） */
+        const existing = ctx.store.readInbox().find((x) => x.note_id === noteId);
+        const refeed = !!existing && existing.status === 'failed';
+        if (ctx.store.readIndex().notes.some((n) => n.note_id === noteId)
+          || (existing && !refeed)) {
           results.push({ note_id: noteId, status: 'duplicate' });
           continue;
         }
@@ -78,25 +85,34 @@ module.exports = function captureRoutes(ctx) {
         /* 限速：串行 + 随机抖动，规避风控（§5.1） */
         await sleep(1500 + Math.random() * 1500);
 
-        let detail = null;
+        let detail;
         try {
           detail = await fetchNoteDetail(noteId, xsec);
-        } catch (_) {
-          detail = null;
+        } catch (e) {
+          detail = { ok: false, reason: 'network', message: '抓取异常: ' + (e.message || e) };
+        }
+        /* 瞬时类失败自动补抓一次；token_expired 重试必败（旧 token），跳过 */
+        if (!detail.ok && (detail.reason === 'network' || detail.reason === 'risk' || detail.reason.startsWith('http_'))) {
+          await sleep(3000 + Math.random() * 2000);
+          try {
+            detail = await fetchNoteDetail(noteId, xsec);
+          } catch (e) {
+            detail = { ok: false, reason: 'network', message: '抓取异常: ' + (e.message || e) };
+          }
         }
 
-        /* 详情抓取失败（xsec_token 过期 302 登录页 / 风控）：
-           清单信息仍入箱、标记 failed，不阻塞其余条目 */
-        if (!detail) {
-          ctx.store.addInboxEntry({
+        /* 详情抓取失败：清单信息仍入箱、标记 failed（含分类原因），不阻塞其余条目；
+           refeed 时覆盖旧 failed 条目（刷新原因与捕获时间） */
+        if (!detail.ok) {
+          ctx.store.upsertInboxEntry({
             note_id: noteId,
             captured_at: new Date().toISOString(),
             status: 'failed',
             raw: fallbackRaw(item),
-            process: { stage: 'fetch_detail', error: '详情抓取失败（xsec_token 过期或风控）' }
+            process: { stage: 'fetch_detail', error: detail.message, reason: detail.reason }
           });
-          console.log(`[capture/list] 详情抓取失败: ${noteId} 《${(item && item.title) || ''}》`);
-          results.push({ note_id: noteId, status: 'failed', error: 'fetch_detail failed' });
+          console.log(`[capture/list] 详情抓取失败${refeed ? '（重采）' : ''}: ${noteId} [${detail.reason}] 《${(item && item.title) || ''}》`);
+          results.push({ note_id: noteId, status: 'failed', reason: detail.reason, error: detail.message });
           continue;
         }
 
@@ -109,15 +125,16 @@ module.exports = function captureRoutes(ctx) {
             subtitle: detail.subtitle,
             comments: []
           });
-          ctx.store.addInboxEntry({
+          /* 新条目追加；refeed 重采成功 → 覆盖旧 failed 条目，转回待处理 */
+          ctx.store.upsertInboxEntry({
             note_id: noteId,
             captured_at: new Date().toISOString(),
             status: 'pending',
             raw,
             process: null
           });
-          console.log(`[capture/list] 入收件箱: ${noteId} 《${raw.title}》`);
-          results.push({ note_id: noteId, status: 'inbox' });
+          console.log(`[capture/list] 入收件箱${refeed ? '（failed 重采修复）' : ''}: ${noteId} 《${raw.title}》`);
+          results.push({ note_id: noteId, status: 'inbox', refeed: refeed || undefined });
         } catch (e) {
           results.push({ note_id: noteId, status: 'failed', error: e.message || 'normalize failed' });
         }

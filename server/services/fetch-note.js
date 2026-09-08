@@ -6,7 +6,9 @@
  * 提取正文 desc / 视频字幕 / 图片列表。纯读模块、无本地状态。
  *
  * 带 xsec_token 的 explore 链接未登录也返回完整 __INITIAL_STATE__；
- * token 过期时 302 到登录页 → HTML 无 __INITIAL_STATE__ → 返回 null。
+ * 失败不再折叠为 null，而返回 {ok:false, reason, message}：
+ * reason ∈ token_expired(302 登录页) / risk(风控) / network(超时断网) /
+ *          http_<status> / incomplete(内容缺失)，message 为可直接展示的中文原因。
  */
 
 const DETAIL_BASE = 'https://www.xiaohongshu.com/explore/';
@@ -128,16 +130,21 @@ function parseSrt(srt) {
   return out.join('\n').replace(/\n+/g, '\n').trim();
 }
 
-/** 带 UA/超时的文本抓取；失败返回 null（不抛错） */
+/** 带 UA/超时的文本抓取（不抛错）。
+ *  成功 {ok:true, text, url}（url 为重定向后最终 URL，用于识别 302 登录页）；
+ *  失败 {ok:false, reason}——network（超时/断网）/ risk（403/429/461 风控码）/ http_<status> */
 async function fetchText(url, timeoutMs = 15000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const resp = await fetch(url, { headers: HEADERS, signal: ctrl.signal, redirect: 'follow' });
-    if (!resp.ok) return null;
-    return await resp.text();
+    if (!resp.ok) {
+      const s = resp.status;
+      return { ok: false, reason: (s === 403 || s === 429 || s === 461) ? 'risk' : `http_${s}` };
+    }
+    return { ok: true, text: await resp.text(), url: resp.url || url };
   } catch (_) {
-    return null;
+    return { ok: false, reason: 'network' };
   } finally {
     clearTimeout(timer);
   }
@@ -147,36 +154,48 @@ async function fetchText(url, timeoutMs = 15000) {
  * 抓取单条笔记详情。
  * @param {string} noteId
  * @param {string} xsecToken
- * @returns {Promise<null | {note: object, subtitle: {text, lang} | null}>}
- *   note 为 __INITIAL_STATE__ 原始 note（title/desc/user/interactInfo/imageList/
+ * @returns {Promise<{ok:true, note:object, subtitle:{text,lang}|null}
+ *               | {ok:false, reason:string, message:string}>}
+ *   ok 时 note 为 __INITIAL_STATE__ 原始 note（title/desc/user/interactInfo/imageList/
  *   video/tagList/time），可直接喂 normalizeCapture；
- *   失败（网络 / 风控 / xsec_token 过期 302 登录页）返回 null。
+ *   失败 reason ∈ token_expired / risk / network / http_<status> / incomplete / invalid，
+ *   message 为可直接写入收件箱展示的中文原因（含修复建议）。
  */
 async function fetchNoteDetail(noteId, xsecToken) {
-  if (!noteId || !xsecToken) return null;
+  const bad = (reason, message) => ({ ok: false, reason, message });
+  if (!noteId || !xsecToken) return bad('invalid', '缺少 note_id / xsec_token');
 
-  const html = await fetchText(exploreUrl(noteId, xsecToken), 15000);
-  if (!html) return null;
+  const page = await fetchText(exploreUrl(noteId, xsecToken), 15000);
+  if (!page.ok) {
+    const msg = page.reason === 'network'
+      ? '网络超时或中断，稍后重试或重扫收藏夹'
+      : page.reason === 'risk'
+        ? '疑似触发风控（HTTP 风控码），建议稍后重扫收藏夹'
+        : `详情页 HTTP ${page.reason.slice(5)} 错误，建议重扫收藏夹`;
+    return bad(page.reason, msg);
+  }
+  /* xsec_token 过期：302 到登录页，最终 URL 含 /login */
+  if (/\/login/i.test(page.url)) return bad('token_expired', 'xsec_token 已过期（跳转登录页），重扫收藏夹即可修复');
 
-  const state = extractInitialState(html);
-  if (!state) return null;
+  const state = extractInitialState(page.text);
+  if (!state) return bad('risk', '页面无 __INITIAL_STATE__（疑似风控验证页），稍后重扫收藏夹重试');
 
   const map = (state.note && state.note.noteDetailMap) || {};
   const note = (map[noteId] && map[noteId].note)
     || Object.values(map).map((v) => v && v.note).find(Boolean)
     || null;
-  if (!note || (!note.title && !note.desc)) return null;
+  if (!note || (!note.title && !note.desc)) return bad('incomplete', '详情内容缺失（无标题且无正文），笔记可能已删除或不可见');
 
   /* 字幕 URL 带签名会过期，此刻立即下载；失败静默降级（正文照常） */
   let subtitle = null;
   const picked = pickSubtitleUrl(note.video);
   if (picked) {
-    const srt = await fetchText(picked.url.replace(/^http:\/\//, 'https://'), 12000);
-    const text = srt ? parseSrt(srt) : '';
+    const sub = await fetchText(picked.url.replace(/^http:\/\//, 'https://'), 12000);
+    const text = sub.ok ? parseSrt(sub.text) : '';
     if (text) subtitle = { text, lang: picked.lang };
   }
 
-  return { note, subtitle };
+  return { ok: true, note, subtitle };
 }
 
 module.exports = { fetchNoteDetail, exploreUrl, extractInitialState, pickSubtitleUrl, parseSrt, sleep };

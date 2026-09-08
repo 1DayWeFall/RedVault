@@ -159,6 +159,7 @@ b{font-weight:600}
 .inbox-card h4{font-size:13.5px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .inbox-card-meta{margin-top:5px;color:var(--ink3);font-size:11.5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .inbox-card-desc{margin-top:10px;color:var(--ink2);font-size:12px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.inbox-card-err{margin-top:8px;padding:6px 9px;border-radius:8px;background:var(--red-soft);color:var(--red);font-size:11.5px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .inbox-card-foot{margin-top:11px;padding-top:11px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px}
 .inbox-state{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink3)}
 .inbox-state .st-dot{width:6px;height:6px;border-radius:50%;background:var(--ink3)}
@@ -171,6 +172,13 @@ b{font-weight:600}
 .mini-btn.danger:hover{background:var(--red-soft);color:var(--red)}
 .mini-btn.ai{color:var(--ink-strong);font-weight:500}
 .mini-btn.ai:hover{background:var(--ai-soft)}
+
+/* ── 收件箱多选（复用笔记库复选视觉） ── */
+.inbox-card{position:relative}
+.inbox-card .cover-check{position:absolute;z-index:3;top:10px;right:10px}
+.inbox-card.selected{box-shadow:0 0 0 2px var(--red),var(--sh2)}
+.inbox-card.selected .cover-check{background:var(--red);border-color:var(--red);color:#fff}
+#content.selecting .inbox-card .mini-actions{display:none}
 
 /* ── 空状态 ── */
 .empty{text-align:center;padding:70px 20px 50px}
@@ -357,6 +365,7 @@ b{font-weight:600}
 .ai-btn .ai-spark{color:var(--red)}
 .ai-btn .ai-spark{font-size:13px}
 .select-bar-cost{font-size:11px;font-weight:450;opacity:.82;background:rgba(255,255,255,.16);padding:2px 8px;border-radius:var(--r-chip)}
+.ai-btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* ── Toast ── */
 .toast-region{position:fixed;top:70px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px;pointer-events:none}

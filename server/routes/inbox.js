@@ -33,10 +33,21 @@ module.exports = function inboxRoutes(ctx) {
     } catch (e) { next(e); }
   });
 
-  /* 一键清空 pending */
+  /* 批量清空/删除：
+     - 无参 → 清空全部 pending（旧语义，兼容）
+     - ?scope=failed → 清空全部失败条目（详情抓取失败；重扫收藏夹可自动重采修复）
+     - ?ids=a,b,c → 删除指定条目，不存在的 id 静默忽略 */
   router.delete('/inbox', (req, res) => {
-    ctx.store.saveInbox(ctx.store.readInbox().filter((x) => x.status !== 'pending'));
-    res.status(204).end();
+    const { scope, ids } = req.query;
+    let target;
+    if (ids !== undefined) {
+      target = String(ids).split(',').filter(Boolean);
+    } else {
+      const status = scope === 'failed' ? 'failed' : 'pending';
+      target = ctx.store.readInbox().filter((x) => x.status === status).map((x) => x.note_id);
+    }
+    const removed = ctx.store.removeInboxEntries(target);
+    res.json({ removed });
   });
 
   /* 确认处理 → 202 后台管线（§5.5） */
