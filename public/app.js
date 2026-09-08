@@ -410,6 +410,7 @@ async function openDetail(id) {
       n.comments = parseCommentsMd(s.commentsMd || "");
       n.remark = s.remark && s.remark !== "（空）" ? s.remark : "";
       if (d.fm) {
+        n.url = d.fm.url || n.url;   /* 带 xsec_token 的完整溯源链接优先（列表兜底是裸地址，会被小红书 300031 拒绝） */
         n.category = d.fm.category || n.category;
         n.subcategory = d.fm.subcategory || n.subcategory;
         n.overview = s.overview || n.overview;
