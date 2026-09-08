@@ -211,18 +211,36 @@ function createVault(vaultDir) {
   return api;
 }
 
-/** 迁移 vault：把旧目录下所有 .md 与 attachments/ 递归拷贝到新目录（已存在则覆盖同名） */
+/** 迁移 vault：把旧目录下所有 .md 与 attachments/ 递归拷贝到新目录（已存在则覆盖同名）。
+ *  fs 错误按 code 分类转 400 可读提示（设置页透传给用户，不再被 500 吞掉）。 */
 function migrateVault(oldDir, newDir) {
   const src = path.resolve(oldDir);
   const dst = path.resolve(newDir);
   if (src === dst) return { migrated: 0 };
-  fs.mkdirSync(dst, { recursive: true });
-  let migrated = 0;
-  if (fs.existsSync(src)) {
-    fs.cpSync(src, dst, { recursive: true, force: true });
-    migrated = fs.readdirSync(src).length;
+  const explain = (e) => {
+    const where = `${src} → ${dst}`;
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR' || e.code === 'EINVAL') {
+      return `目标路径不可用（${e.code}），请检查磁盘与路径是否正确：${where}`;
+    }
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      return `无写入权限（${e.code}），请检查目标目录权限，或以管理员身份运行：${where}`;
+    }
+    if (e.code === 'EBUSY') {
+      return `文件被占用（EBUSY），请关闭 Obsidian 等正在使用该目录的程序后重试：${where}`;
+    }
+    return `文件系统错误（${e.code || e.message || e}）：${where}`;
+  };
+  try {
+    fs.mkdirSync(dst, { recursive: true });
+    let migrated = 0;
+    if (fs.existsSync(src)) {
+      fs.cpSync(src, dst, { recursive: true, force: true });
+      migrated = fs.readdirSync(src).length;
+    }
+    return { migrated };
+  } catch (e) {
+    throw { status: 400, code: 'MIGRATE_FAILED', message: 'vault 迁移失败：' + explain(e), cause: e };
   }
-  return { migrated };
 }
 
 module.exports = {

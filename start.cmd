@@ -35,13 +35,14 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":8923 .*LISTENING"') d
 REM wait for ports to be fully released before starting
 timeout /t 2 /nobreak >nul
 
-REM ---- start service in background ----
+REM ---- start service in a detached minimized window ----
+REM (no /b: service gets its own console so it survives this window closing)
 echo [..] starting RedVault (%NODE% server/index.js) ...
-start "" /b "%NODE%" server\index.js
+start "RedVault-server" /min "%NODE%" server\index.js
 
 REM ---- wait and probe health ----
 set "ok=0"
-for /l %%i in (1,1,10) do (
+for /l %%i in (1,1,15) do (
   timeout /t 1 /nobreak >nul
   powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%URL%/api/health' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
   if !errorlevel! equ 0 ( set "ok=1" & goto :ready )
@@ -50,11 +51,13 @@ for /l %%i in (1,1,10) do (
 :ready
 if "!ok!"=="1" (
   echo.
-  echo [OK] RedVault started.
+  start "" "%URL%"
+  echo [OK] RedVault started. Opening %URL% in your browser...
   echo      Entry: %URL%
-  echo      ^(8923 is deprecated - do not use it^)
+  echo      Service runs in the minimized window titled "RedVault-server".
+  echo      Close that window to stop the service. This window can be closed.
 ) else (
   echo [error] service failed to start. Check server/index.js or port conflicts.
-  exit /b 1
 )
 endlocal
+pause

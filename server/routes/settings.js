@@ -75,32 +75,41 @@ module.exports = function settingsRoutes(ctx) {
         cfg.capture.token = 'rv_' + crypto.randomBytes(12).toString('hex');
       }
 
-      /* vault 路径变更：校验 → 迁移 → 热切换 → 重建 index（改路径即时生效） */
+      /* vault 路径变更：校验 → 迁移 → 热切换 → 重建 index（改路径即时生效）。
+       * 迁移失败不连坐：AI/capture 修改先独立落盘，再把迁移错误以 400 可读信息返回（fs 错误已在 vault.js 分类） */
       let vaultChanged = false;
+      let vaultError = null;
       if (body.vaultPath !== undefined && body.vaultPath !== null) {
         const newPath = String(body.vaultPath).trim();
         if (newPath && newPath !== cfg.vaultPath) {
           // 路径合法性：拒绝包含 .. 穿越（防路径注入）
           if (newPath.includes('..')) {
-            throw { status: 400, code: 'BAD_VAULT_PATH', message: 'vault 路径不能包含 .. 穿越' };
+            vaultError = { status: 400, code: 'BAD_VAULT_PATH', message: 'vault 路径不能包含 .. 穿越' };
+          } else {
+            // path.resolve：支持盘符绝对路径（如 F:\Work），path.join 会拼出非法路径
+            const oldAbs = path.resolve(ctx.ROOT, cfg.vaultPath || 'vault');
+            const newAbs = path.resolve(ctx.ROOT, newPath);
+            try {
+              migrateVault(oldAbs, newAbs);        // 迁移旧内容（fs 错误已分类为 400 可读）
+              ctx.vault.setDir(newAbs);             // 热切换
+              cfg.vaultPath = newPath;
+              vaultChanged = true;
+            } catch (e) {
+              vaultError = e.code ? e : { status: 400, code: 'MIGRATE_FAILED', message: 'vault 迁移失败：' + (e.message || e) };
+            }
           }
-          const oldAbs = path.join(ctx.ROOT, cfg.vaultPath || 'vault');
-          const newAbs = path.resolve(ctx.ROOT, newPath);
-          migrateVault(oldAbs, newAbs);          // 迁移旧内容（失败抛错，不保存 config）
-          ctx.vault.setDir(newAbs);               // 热切换
-          cfg.vaultPath = newPath;
-          vaultChanged = true;
         } else if (newPath) {
           cfg.vaultPath = newPath;
         }
       }
 
+      /* AI/capture 先独立落盘（迁移失败时保留原 vaultPath，不连坐其他配置） */
       ctx.store.saveConfig(cfg);
       if (vaultChanged) {
         // 迁移/切换后按新 vault 扫描重建 index，保证前端列表一致
-        const meta = ctx.vault.rebuildIndexMeta();
-        ctx.store.saveIndex({ notes: meta });
+        ctx.store.saveIndex({ notes: ctx.vault.rebuildIndexMeta() });
       }
+      if (vaultError) return next(vaultError);
       res.json({ ok: true, vaultChanged });
     } catch (e) { next(e); }
   });

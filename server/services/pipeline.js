@@ -6,7 +6,8 @@
  *   downloading_images → ai_processing → relating → writing
  * - 无 AI 配置时降级直落盘（摘要空/分类「未整理」），失败保留断点可续跑
  * - 图片下载带 Referer；sharp 可用则压缩 + 生成 300px 缩略图，缺失则原图直用
- * - 视觉模型一次合并调用（>6 张分批，后续批仅补 OCR）；纯文本/视频走文本槽位
+ * - 视觉模型一次合并调用（>6 张分批，后续批仅补 OCR）；纯文本/视频走文本槽位；
+ *   vision 未配置时图文笔记自动回退文本槽位（无 OCR），不再静默降级
  */
 
 const fs = require('fs');
@@ -37,9 +38,10 @@ const P1 = (title, desc, commentsTxt, subtitleTxt) => {
 严格输出 JSON：{"ocr":[],"summary":"","key_points":[],"category":"","subcategory":"","tags":[],"comment_insights":[]}`;
 };
 
-const P2 = (title, desc, commentsTxt, subtitleTxt) => {
-  const kind = subtitleTxt ? '视频笔记（含平台字幕，可基于字幕整理）' : '视频笔记（无字幕，视频未转写，内容基于简介与评论）';
-  const note = subtitleTxt ? '' : '（末尾注明「视频未转写，内容基于简介与评论」）';
+const P2 = (title, desc, commentsTxt, subtitleTxt, kindOverride = '') => {
+  // kindOverride：vision 未配置时图文笔记回退 text 整理的措辞（避免误称"视频笔记"）
+  const kind = kindOverride || (subtitleTxt ? '视频笔记（含平台字幕，可基于字幕整理）' : '视频笔记（无字幕，视频未转写，内容基于简介与评论）');
+  const note = !kindOverride && !subtitleTxt ? '（末尾注明「视频未转写，内容基于简介与评论」）' : '';
   const subBlock = subtitleTxt ? `\n视频字幕：\n${subtitleTxt}\n` : '';
   return `你是小红书内容整理助手。请对这篇帖子（${kind}）完成整理：
 1) summary：≤200 字摘要${note}
@@ -142,13 +144,19 @@ function normalizeAi(r, isVideo = false, hasSubtitle = false) {
   return out;
 }
 
-/** AI 整理（有图走 vision，否则 text；返回 null 表示未配置或失败由调用方降级） */
+/** AI 整理：有图且 vision 已配走 vision；vision 未配时回退 text（无 OCR）；
+ *  无图走 text。raw.commentsText 可直传已渲染评论文本（reprocess 用），优先于 raw.comments。
+ *  返回 null 表示未配置或失败，由调用方降级。 */
 async function runAi(ctx, raw, imgs) {
-  const commentsTxt = renderCommentsMd(raw.comments).slice(0, 3000);
+  const commentsTxt = (raw.commentsText !== undefined
+    ? String(raw.commentsText)
+    : renderCommentsMd(raw.comments)
+  ).slice(0, 3000);
   const isVideo = raw.type === 'video';
   const subtitleTxt = String(raw.subtitle_text || '').slice(0, 4000);
+  const visionReady = !!ctx.store.readConfig().ai?.vision?.apiKey;
 
-  if (imgs.local.length) {
+  if (imgs.local.length && visionReady) {
     const first = imgs.local.slice(0, 6);
     const images = await Promise.all(first.map((l) => imageToBase64(l.abs)));
     const content = [
@@ -171,7 +179,12 @@ async function runAi(ctx, raw, imgs) {
     }
     return result;
   }
-  const result = await ctx.ai.chatJson('text', [{ role: 'user', content: P2(raw.title, raw.desc, commentsTxt, subtitleTxt) }], { maxTokens: 2000 });
+  if (imgs.local.length) {
+    console.warn('[pipeline] vision 槽位未配置，图文笔记回退 text 整理（无 OCR）');
+  }
+  const p2 = P2(raw.title, raw.desc, commentsTxt, subtitleTxt,
+    imgs.local.length ? (isVideo ? '视频笔记（图片未识别，内容基于字幕/简介与评论）' : '图文笔记（图片未识别 OCR，内容基于正文与评论）') : '');
+  const result = await ctx.ai.chatJson('text', [{ role: 'user', content: p2 }], { maxTokens: 2000 });
   return normalizeAi(result, isVideo, !!subtitleTxt);
 }
 
@@ -306,4 +319,4 @@ function createPipeline(ctx) {
   return { confirm, status };
 }
 
-module.exports = { createPipeline, STAGES, renderCommentsMd, CATEGORIES };
+module.exports = { createPipeline, runAi, STAGES, renderCommentsMd, CATEGORIES };

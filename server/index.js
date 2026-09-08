@@ -34,7 +34,8 @@ const { createVault } = require('./services/vault');
 const { createPipeline } = require('./services/pipeline');
 const { createAi } = require('./services/ai');
 const store = createStore(DATA_DIR);
-const vault = createVault(path.join(ROOT, store.readConfig().vaultPath || 'vault'));
+// path.resolve：vaultPath 支持盘符绝对路径（如 F:\Work），path.join 会拼出非法路径导致启动崩溃
+const vault = createVault(path.resolve(ROOT, store.readConfig().vaultPath || 'vault'));
 const ctx = { store, vault, sharpAvailable, ROOT };
 ctx.ai = createAi(ctx);
 ctx.pipeline = createPipeline(ctx);
@@ -61,6 +62,11 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: `接口不存在: ${req.method} ${req.originalUrl}` } });
 });
 
+/* ── vault 附件动态托管（卡片缩略图/图片用）：每次请求取当前 attachDir，兼容设置页热切换 ── */
+app.use('/vault-files', (req, res, next) => {
+  express.static(ctx.vault.attachDir)(req, res, next);
+});
+
 /* ── 静态托管前端 ── */
 app.use(express.static(path.join(ROOT, 'public')));
 
@@ -72,7 +78,7 @@ app.use((err, req, res, next) => {
   let status = err.status || 500;
   if (err.name === 'MulterError') status = 400; // 文件过大/类型错误等
   res.status(status).json({
-    error: { code: err.code || 'INTERNAL', message: status >= 500 ? '服务器内部错误' : (err.message || '请求失败') }
+    error: { code: err.code || 'INTERNAL', message: err.message || (status >= 500 ? '服务器内部错误' : '请求失败') }
   });
 });
 

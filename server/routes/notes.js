@@ -3,7 +3,10 @@
 /** 笔记路由（DESIGN §6）：列表只回 index 元数据（不发正文），详情读 vault 全文并解析锚点区块 */
 
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { readSection } = require('../services/vault');
+const { runAi } = require('../services/pipeline');
 
 /** 允许前端编辑的区块白名单（不含 frontmatter 关联区块） */
 const EDITABLE_SECTIONS = new Set(['summary', 'points', 'body', 'ocr', 'comments', 'related', 'attachments', 'remark']);
@@ -84,6 +87,68 @@ module.exports = function notesRoutes(ctx) {
       ctx.vault.updateNoteFile(meta.file, {}, { [key]: String(content ?? '') });
       ctx.store.upsertIndexNote({ note_id: meta.note_id, modified_at: new Date().toISOString() });
       res.json({ ok: true });
+    } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
+  });
+
+  /* 重新打标：读 vault 原文 → 复用管线 runAi（含 vision→text 回退）重跑 →
+   * 锚点更新 AI 区块与分类标签（用户手写区块与评论精选不动，仅刷新 AI 洞察段） */
+  router.post('/notes/:id/reprocess', async (req, res, next) => {
+    try {
+      const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
+      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      const cfg = ctx.store.readConfig();
+      if (!cfg.ai?.text?.apiKey && !cfg.ai?.vision?.apiKey) {
+        throw { status: 400, code: 'NO_AI_CONFIG', message: '尚未配置 AI，请先在设置页填写 text 或 vision 槽位' };
+      }
+
+      const { fm, content } = ctx.vault.readNoteFile(meta.file);
+      const body = readSection(content, 'body') || '';
+      const commentsMd = readSection(content, 'comments') || '';
+      const subtitle = readSection(content, 'subtitle') || '';
+
+      /* 本地图片按 frontmatter 记录重组（丢失的跳过，防读文件抛错） */
+      const attachDir = ctx.vault.attachDir;
+      const local = (Array.isArray(fm.images) ? fm.images : [])
+        .map((f) => ({ file: String(f), abs: path.join(attachDir, path.basename(String(f))) }))
+        .filter((l) => fs.existsSync(l.abs));
+
+      const raw = {
+        title: fm.title || meta.title,
+        desc: body === '（正文缺失）' ? '' : body,
+        type: fm.type || 'normal',
+        subtitle_text: subtitle,
+        commentsText: commentsMd,   // 已渲染评论（含旧 AI 洞察）直接作为上下文
+        comments: [], image_urls: []
+      };
+
+      let ai;
+      try {
+        ai = await runAi(ctx, raw, { local, remote: [], thumb: fm.cover || '' });
+      } catch (e) {
+        throw e.code ? e : { status: 502, code: 'AI_REPROCESS_FAILED', message: 'AI 处理失败：' + (e.message || e) };
+      }
+
+      /* 区块更新：summary/points 覆盖；ocr 有内容才写；comments 保留评论精选、仅刷新 AI 洞察段 */
+      const sections = {
+        summary: ai.summary || '（待 AI 整理）',
+        points: ai.key_points.map((k) => `- ${k}`).join('\n') || '（待 AI 整理）'
+      };
+      if (ai.ocr.length) sections.ocr = ai.ocr.map((o) => `- ${o}`).join('\n');
+      if (ai.comment_insights.length) {
+        const [commentMain] = String(commentsMd).split('\n**AI 洞察**');
+        sections.comments = (commentMain || '（无）').trimEnd()
+          + '\n\n**AI 洞察**\n' + ai.comment_insights.map((c) => `- ${c}`).join('\n');
+      }
+      ctx.vault.updateNoteFile(meta.file,
+        { category: ai.category, subcategory: ai.subcategory, tags: ai.tags },
+        sections);
+      ctx.store.upsertIndexNote({
+        note_id: meta.note_id,
+        category: ai.category, subcategory: ai.subcategory, tags: ai.tags,
+        modified_at: new Date().toISOString()
+      });
+      console.log(`[notes] reprocess ${meta.note_id} 《${meta.title}》 → ${ai.category}/${ai.subcategory || '-'} tags=[${ai.tags.join(',')}]`);
+      res.json({ ok: true, note: ctx.store.readIndex().notes.find((n) => n.note_id === meta.note_id) });
     } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
   });
 

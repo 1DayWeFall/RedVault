@@ -33,6 +33,13 @@ async function api(path, opts = {}) {
 /* 瀑布流高度：按 note_id 稳定伪随机，刷新不跳动 */
 const hOf = (id) => 0.95 + (String(id).split("").reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) % 997, 7) % 56) / 100;
 
+/* 封面 URL：本地 vault 附件走 /vault-files 静态路由；远程 URL（图片下载失败时的 cover_url）直用 */
+function coverUrl(cover) {
+  if (!cover) return "";
+  const s = String(cover);
+  return /^https?:\/\//.test(s) ? s : "/vault-files/" + encodeURIComponent(s.split("/").pop());
+}
+
 /* 服务端 index 元数据 → 视图模型（详情字段由 openDetail 按需填充） */
 function mapNote(n) {
   return {
@@ -41,6 +48,7 @@ function mapNote(n) {
     published_at: (n.published_at || "").slice(0, 10), collected_at: (n.collected_at || "").slice(0, 10),
     liked: n.liked_count || 0, category: n.category || "", subcategory: n.subcategory || "",
     tags: n.tags || [], h: hOf(n.note_id), sources: n.sources || [],
+    thumb: coverUrl(n.cover),
     summary: "", key_points: [], ocr: [], comments: [], remark: "", attachments: [],
   };
 }
@@ -86,6 +94,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const fmtK = (n) => n >= 10000 ? (n / 10000).toFixed(1) + "w" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 const covOf = (n) => (COV[n.category] || [,])[0] || "linear-gradient(135deg,#E8E8EE,#D5D5E2)";
 const emojiOf = (n) => n.emoji || (COV[n.category] || [,])[1] || "📝";
+/* 封面图 <img>：加载成功盖住色块与 emoji；onerror 自动移除，露出底色回退（不裂版） */
+const coverImg = (src) => (src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "");
 /* 楼中楼：高赞回复随父评论一并展示，op = 笔记作者回复 */
 const replyHtml = (c) => (c.replies || []).length ? `<div class="c-replies">${c.replies.map((r) => `
           <div class="c-reply"><span class="c-text">${esc(r.text)}</span><span class="c-meta">${r.op ? '<i class="op-tag">作者</i>' : ""}<span class="likes">♥ ${fmtK(r.likes)}</span><span>@${esc(r.author || "匿名")}</span></span></div>`).join("")}</div>` : "";
@@ -171,7 +181,7 @@ function noteCard(n, i) {
   const h = Math.round(150 * (n.h || 1.2));
   return `<article class="card${isSyn ? " card--syn" : ""}${App.selected.has(n.id) ? " selected" : ""}" data-id="${n.id}" style="animation-delay:${Math.min(i * 40, 360)}ms" tabindex="0" role="button" aria-label="${esc(n.title)}">
     <div class="cover" style="--cov:${covOf(n)};height:${h}px">
-      ${badge}<span class="cover-emoji">${isSyn ? "◆" : emojiOf(n)}</span>
+      ${badge}<span class="cover-emoji">${isSyn ? "◆" : emojiOf(n)}</span>${coverImg(n.thumb)}
       ${n.liked ? `<span class="cover-likes">${fmtK(n.liked)}</span>` : ""}
       <span class="cover-check" aria-hidden="true">✓</span>
     </div>
@@ -352,7 +362,7 @@ function inboxCard(it, i) {
   return `<div class="inbox-card${App.selected.has(it.id) ? " selected" : ""}" data-id="${it.id}" style="animation-delay:${i * 60}ms" tabindex="0" role="button">
     <span class="cover-check" aria-hidden="true">✓</span>
     <div class="inbox-card-top">
-      <div class="cover inbox-thumb" style="--cov:${cov[0]}"><span class="cover-emoji" style="font-size:24px">${cov[1]}</span></div>
+      <div class="cover inbox-thumb" style="--cov:${cov[0]}"><span class="cover-emoji" style="font-size:24px">${cov[1]}</span>${coverImg((r.image_urls || [])[0])}</div>
       <div style="min-width:0;flex:1">
         <h4>${r.type === "video" ? `<span class="cover-badge video" style="position:static;margin-right:6px">视频</span>` : ""}${esc(r.title)}</h4>
         <div class="inbox-card-meta">@${esc(r.author)}<span class="dot"></span>♥ ${fmtK(r.liked_count)}<span class="dot"></span>${it.captured_at} 捕获</div>
@@ -426,7 +436,7 @@ async function openDetail(id) {
     </div>
     <div class="drawer-scroll">
       <div class="detail-hero cover" style="--cov:${isSyn ? "#17171B" : covOf(n)}">
-        <span class="cover-emoji"${isSyn ? ' style="color:#fff"' : ""}>${isSyn ? "◆" : emojiOf(n)}</span>
+        <span class="cover-emoji"${isSyn ? ' style="color:#fff"' : ""}>${isSyn ? "◆" : emojiOf(n)}</span>${coverImg(n.thumb)}
         ${isSyn ? `<span class="cover-badge syn">◆ AI 合成</span>` : n.type === "video" ? `<span class="cover-badge video">视频笔记</span>` : ""}
       </div>
       <div class="detail-head">
@@ -471,8 +481,22 @@ async function openDetail(id) {
         .catch((e2) => toast(e2.message || "保存失败", "err"));
     }, 700);
   };
-  $("#btnReprocess").onclick = () => {
-    toast("重新打标将在接入 AI 管线后开放（M4）", "info");
+  $("#btnReprocess").onclick = async () => {
+    const btn = $("#btnReprocess");
+    btn.disabled = true; btn.textContent = "重跑中…";
+    try {
+      const r = await api("/notes/" + encodeURIComponent(id) + "/reprocess", { method: "POST", body: {} });
+      Object.assign(n, mapNote(r.note), { __loaded: false });   // 重置详情缓存，openDetail 重新拉取
+      renderSidebar();
+      if (App.view === "library") renderLibrary();
+      await openDetail(id);
+      toast("AI 重新打标完成", "ok");
+    } catch (e) {
+      toast(e.message || "重新打标失败", "err");
+    } finally {
+      const b = $("#btnReprocess");
+      if (b) { b.disabled = false; b.textContent = "↺ 重新打标"; }
+    }
   };
   $("#btnDelNote").onclick = () => {
     if (!confirm(`删除《${n.title}》？\n将同时清理其附件，操作不可恢复。`)) return;
@@ -560,7 +584,7 @@ function synSections(n, srcs) {
 
 function relCard(n) {
   return `<div class="rel-card" data-id="${n.id}" role="button" tabindex="0">
-    <div class="cover" style="--cov:${covOf(n)}"><span class="cover-emoji">${n.type === "synthesis" ? "◆" : emojiOf(n)}</span></div>
+    <div class="cover" style="--cov:${covOf(n)}"><span class="cover-emoji">${n.type === "synthesis" ? "◆" : emojiOf(n)}</span>${coverImg(n.thumb)}</div>
     <div class="rc-title">${esc(n.title)}</div></div>`;
 }
 
@@ -594,7 +618,7 @@ function openPreview(id) {
     <div class="modal-head"><h3>捕获预览</h3><span style="font-size:11px;color:var(--ink3)">POST /api/capture · ${it.captured_at}</span><button class="close-x" data-close>×</button></div>
     <div class="modal-body">
       <div style="display:flex;gap:14px;margin-bottom:14px">
-        <div class="cover" style="--cov:${cov[0]};width:96px;height:96px;border-radius:12px;flex-shrink:0"><span class="cover-emoji" style="font-size:34px">${cov[1]}</span></div>
+        <div class="cover" style="--cov:${cov[0]};width:96px;height:96px;border-radius:12px;flex-shrink:0"><span class="cover-emoji" style="font-size:34px">${cov[1]}</span>${coverImg((r.image_urls || [])[0])}</div>
         <div><h4 style="font-size:15px;font-weight:600;line-height:1.45">${r.type === "video" ? `<span class="cover-badge video" style="position:static;margin-right:6px">视频</span>` : ""}${esc(r.title)}</h4>
         <div class="inbox-card-meta" style="margin-top:6px">@${esc(r.author)}<span class="dot"></span>♥ ${fmtK(r.liked_count)}<span class="dot"></span>${(r.tags || []).map((t) => "#" + esc(t)).join(" ")}</div></div>
       </div>
@@ -878,6 +902,12 @@ async function openSettings() {
   $("#btnGuide").onclick = () => openUserscript();
   $("#btnSaveSettings").onclick = async () => {
     const val = (sel) => ($(sel)?.value ?? "").trim();
+    const vaultNew = ($("#vaultPathInput")?.value ?? "").trim();
+    const vaultOld = cfg?.vaultPath || "vault";
+    if (vaultNew && vaultNew !== vaultOld
+      && !confirm(`将把全部笔记与附件复制到新 vault 路径：\n  ${vaultOld}  →  ${vaultNew}\n\n新目录中已有同名文件会被覆盖（源目录保留不动）。\n确定切换？`)) return;
+    const btn = $("#btnSaveSettings");
+    btn.disabled = true;
     const body = {
       ai: {
         text: { baseUrl: val("[data-slot=text-base]"), apiKey: val("[data-slot=text-key]"), model: val("[data-slot=text-model]") },
@@ -891,7 +921,11 @@ async function openSettings() {
       closeModal();
       toast(r.vaultChanged ? "vault 路径已切换并迁移，笔记库已更新" : "设置已保存到 data/config.json", "ok");
       if (r.vaultChanged) { await loadAll(); renderSidebar(); if (App.view === "library") renderLibrary(); }
-    } catch (e) { toast(e.message || "保存失败", "err"); }
+    } catch (e) {
+      toast(e.message || "保存失败", "err");
+    } finally {
+      btn.disabled = false;
+    }
   };
 }
 
