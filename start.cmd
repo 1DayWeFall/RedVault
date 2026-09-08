@@ -25,11 +25,11 @@ if not defined NODE (
 
 REM ---- clean old listeners on 3789 and deprecated 8923 ----
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":3789 .*LISTENING"') do (
-  echo [clean] killing old process on 3789 (PID %%p)
+  echo [clean] killing old process on 3789 ^(PID %%p^)
   taskkill /F /PID %%p >nul 2>&1
 )
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":8923 .*LISTENING"') do (
-  echo [clean] killing deprecated process on 8923 (PID %%p)
+  echo [clean] killing deprecated process on 8923 ^(PID %%p^)
   taskkill /F /PID %%p >nul 2>&1
 )
 REM wait for ports to be fully released before starting

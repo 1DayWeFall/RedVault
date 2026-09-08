@@ -40,6 +40,7 @@ function defaultConfig() {
       text:   { baseUrl: '', apiKey: '', model: '', priceIn: 0, priceOut: 0 },
       vision: { baseUrl: '', apiKey: '', model: '', priceIn: 0, priceOut: 0 }
     },
+    ocr: { enabled: false, lang: 'chi_sim+eng' },  // 本地 OCR（Tesseract）：免 API 费，vision 未配时接管图片文字提取
     capture: { commentCount: 20, token: 'rv_' + crypto.randomBytes(12).toString('hex') },
     vaultPath: 'vault'
   };
@@ -74,6 +75,7 @@ function createStore(dataDir) {
       cfg.ai = cfg.ai || dft.ai;
       cfg.ai.text = { ...dft.ai.text, ...cfg.ai.text };
       cfg.ai.vision = { ...dft.ai.vision, ...cfg.ai.vision };
+      cfg.ocr = { ...dft.ocr, ...cfg.ocr };
       cfg.capture = { ...dft.capture, ...cfg.capture };
       if (!cfg.capture.token) cfg.capture.token = dft.capture.token;
       if (!cfg.vaultPath) cfg.vaultPath = dft.vaultPath;

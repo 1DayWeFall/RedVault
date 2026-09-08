@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         薯藏 RedVault · 小红书收藏夹批量采集
 // @namespace    redvault
-// @version      0.4.0
+// @version      0.4.2
 // @description  在收藏夹页 hook 列表接口自动吸收清单（note_id + xsec_token），滚动翻页抓全量后批量上报 RedVault；正文/字幕/图片由本地服务端抓详情页获得，零 DOM 提取
 // @author       1DayWeFall
 // @match        https://www.xiaohongshu.com/*
@@ -262,18 +262,68 @@
     });
   }
 
+  /* ── 增量查询：上报前问服务端哪些需要报（新增 + 收件箱 failed 重采 + 已入库但
+     溯源 token 过期的 stale 续期候选），其余跳过。
+     items 格式携带 token，服务端比对库内 token 返回 {fresh, stale}；
+     旧版服务端只认 note_ids → 400 → resolve(null)，调用方回退全量上报 ── */
+  function checkFresh(items) {
+    return new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: CONFIG.SERVER + '/api/capture/check',
+        headers: { 'Content-Type': 'application/json', 'X-Capture-Token': CONFIG.TOKEN },
+        data: JSON.stringify({ items }),
+        timeout: 30000,
+        onload: (r) => {
+          if (r.status >= 200 && r.status < 300) {
+            try { resolve(JSON.parse(r.responseText)); } catch (_) { resolve(null); }
+          } else resolve(null); // 400 旧服务端 / 401 等 → 回退全量路径统一处理
+        },
+        onerror: () => resolve(null),
+        ontimeout: () => resolve(null)
+      });
+    });
+  }
+
   async function reportAll() {
-    const items = [...entries.values()];
-    if (!items.length) return;
+    const all = [...entries.values()];
+    if (!all.length) return;
     phase = 'reporting'; $btnMain.disabled = true; $btnReport.style.display = 'none';
-    let inbox = 0, dup = 0, failed = 0;
+    let items = all, skipped = 0;
+
+    /* 增量：只上报 fresh（新增 + failed 重采）∪ stale（已入库但溯源 token 过期，重报即续期链接） */
+    setStatus('查询服务端已知条目（增量上报）…');
+    let freshSet = null, staleSet = null;
+    for (let i = 0; i < all.length; i += 1000) {
+      const part = all.slice(i, i + 1000).map((e) => ({ note_id: e.note_id, xsec_token: e.xsec_token }));
+      const r = await checkFresh(part);
+      if (!r || !Array.isArray(r.fresh)) { freshSet = null; break; }
+      if (!freshSet) freshSet = new Set();
+      for (const id of r.fresh) freshSet.add(id);
+      if (Array.isArray(r.stale)) {
+        if (!staleSet) staleSet = new Set();
+        for (const id of r.stale) staleSet.add(id);
+      }
+    }
+    if (freshSet) {
+      items = all.filter((e) => freshSet.has(e.note_id) || (staleSet && staleSet.has(e.note_id)));
+      skipped = all.length - items.length;
+    }
+    if (!items.length) {
+      phase = 'idle'; $btnMain.disabled = false; refreshCount();
+      setStatus(`<span class="rv-ok">完成 ✓</span> ${all.length} 条均已入库/入箱，无需上报`);
+      return;
+    }
+
+    let inbox = 0, dup = 0, failed = 0, refreshed = 0;
     for (let i = 0; i < items.length; i += CONFIG.REPORT_BATCH) {
       const batch = items.slice(i, i + CONFIG.REPORT_BATCH);
-      setStatus(`上报 ${Math.min(i + batch.length, items.length)}/${items.length} 批次中…<br>服务端逐条抓正文，每条约 2~3s，请勿关闭页面`);
+      setStatus(`上报 ${Math.min(i + batch.length, items.length)}/${items.length} 批次中${skipped ? `（已跳过 ${skipped} 条已入库）` : ''}<br>服务端逐条抓正文，每条约 2~3s，请勿关闭页面`);
       try {
         const resp = await postBatch(batch);
         for (const r of resp.results || []) {
           if (r.status === 'inbox') inbox++;
+          else if (r.status === 'refreshed') refreshed++;
           else if (r.status === 'duplicate') dup++;
           else failed++;
         }
@@ -285,7 +335,7 @@
       }
     }
     phase = 'idle'; $btnMain.disabled = false; refreshCount();
-    setStatus(`<span class="rv-ok">完成 ✓</span> 入箱 ${inbox} · 重复 ${dup} · 失败 ${failed}<br>到 RedVault 收件箱确认处理`);
+    setStatus(`<span class="rv-ok">完成 ✓</span> 入箱 ${inbox} · 重复 ${dup}${refreshed ? ` · 链接刷新 ${refreshed}` : ''} · 失败 ${failed}${skipped ? ` · 跳过 ${skipped}` : ''}<br>到 RedVault 收件箱确认处理`);
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

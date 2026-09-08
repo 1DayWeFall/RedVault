@@ -7,7 +7,8 @@
  * - 无 AI 配置时降级直落盘（摘要空/分类「未整理」），失败保留断点可续跑
  * - 图片下载带 Referer；sharp 可用则压缩 + 生成 300px 缩略图，缺失则原图直用
  * - 视觉模型一次合并调用（>6 张分批，后续批仅补 OCR）；纯文本/视频走文本槽位；
- *   vision 未配置时图文笔记自动回退文本槽位（无 OCR），不再静默降级
+ *   vision 未配置时：ocr.enabled 且 tesseract.js 可用 → 本地 OCR 提取图中文字后
+ *   走 text 槽整理（P1L，免 vision 费用）；否则回退 text（无 OCR），不再静默降级
  */
 
 const fs = require('fs');
@@ -61,6 +62,56 @@ const P2 = (title, desc, commentsTxt, subtitleTxt, kindOverride = '') => {
 /* sharp 可选加载（§12 缺失降级原图） */
 let sharp = null;
 try { sharp = require('sharp'); } catch (_) {}
+
+/* tesseract.js 可选加载（本地 OCR）：缺失仅禁用本地 OCR 分支，不影响主流程 */
+let tesseract = null;
+try { tesseract = require('tesseract.js'); } catch (_) {}
+let ocrWorker = null; // 模块级 worker 复用（创建成本高，语言数据缓存 data/ocr-cache）
+
+/* P1L：本地 OCR + text 槽（免 vision 费用）。图中文字已由 Tesseract 提取，
+   AI 只做摘要/要点/分类/标签（ocr 字段直接采用本地结果，AI 不再产出） */
+const P1L = (title, desc, commentsTxt, subtitleTxt, ocrText) => {
+  const subBlock = subtitleTxt ? `\n视频字幕：\n${subtitleTxt}\n` : '';
+  return `你是小红书内容整理助手。这是同一篇帖子的文本信息与本地 OCR 提取的图中文字，请完成整理：
+1) summary：≤200 字摘要（结合正文与图中文字）
+2) key_points：3–6 条可执行要点
+3) category：一级分类（严格从这些中选：${CATEGORIES.join('/')}）
+4) subcategory：细分场景（自由短语 ≤6 字）
+5) tags：3–5 个短标签
+6) comment_insights：高赞评论中的高价值补充（≤3 条，无则空数组）
+
+标题：${title}
+正文：${desc}${subBlock}
+图中文字（本地 OCR，可能存在识别误差）：
+${ocrText}
+评论：${commentsTxt}
+
+严格输出 JSON：{"summary":"","key_points":[],"category":"","subcategory":"","tags":[],"comment_insights":[]}`;
+};
+
+/** 本地 OCR 结果 → prompt 文本：逐图编号，空图标注（无文字），超长截断 */
+function buildOcrText(ocrArr) {
+  return (ocrArr || []).map((t, i) => `【图${i + 1}】${String(t || '').trim() || '（无文字）'}`).join('\n').slice(0, 6000);
+}
+
+/** 本地 OCR（Tesseract）：逐图串行识别，复用模块级 worker。
+ *  单图失败给空串不阻塞；worker 级失败抛错由调用方降级。 */
+async function ocrImages(ctx, list, lang) {
+  if (!tesseract) throw new Error('tesseract.js 未安装');
+  if (!ocrWorker) {
+    const cachePath = path.join(ctx.ROOT || process.cwd(), 'data', 'ocr-cache');
+    fs.mkdirSync(cachePath, { recursive: true });
+    ocrWorker = await tesseract.createWorker(lang || 'chi_sim+eng', 1, { cachePath, logger: () => {} });
+  }
+  const out = [];
+  for (const l of list) {
+    try {
+      const { data } = await ocrWorker.recognize(l.abs);
+      out.push(String(data?.text || '').replace(/\s+/g, ' ').trim());
+    } catch (_) { out.push(''); }
+  }
+  return out;
+}
 
 /** raw.comments → 评论精选 markdown（含楼中楼缩进） */
 function renderCommentsMd(comments) {
@@ -144,17 +195,19 @@ function normalizeAi(r, isVideo = false, hasSubtitle = false) {
   return out;
 }
 
-/** AI 整理：有图且 vision 已配走 vision；vision 未配时回退 text（无 OCR）；
+/** AI 整理：有图且 vision 已配走 vision；vision 未配且本地 OCR 开启时
+ *  本地提取图中文字后走 text 槽（P1L）；否则回退 text（无 OCR P2）；
  *  无图走 text。raw.commentsText 可直传已渲染评论文本（reprocess 用），优先于 raw.comments。
- *  返回 null 表示未配置或失败，由调用方降级。 */
-async function runAi(ctx, raw, imgs) {
+ *  deps.ocrFn 可注入 OCR 实现（测试用），默认 ocrImages。返回 null 表示未配置或失败，由调用方降级。 */
+async function runAi(ctx, raw, imgs, deps = {}) {
   const commentsTxt = (raw.commentsText !== undefined
     ? String(raw.commentsText)
     : renderCommentsMd(raw.comments)
   ).slice(0, 3000);
   const isVideo = raw.type === 'video';
   const subtitleTxt = String(raw.subtitle_text || '').slice(0, 4000);
-  const visionReady = !!ctx.store.readConfig().ai?.vision?.apiKey;
+  const cfg = ctx.store.readConfig();
+  const visionReady = !!cfg.ai?.vision?.apiKey;
 
   if (imgs.local.length && visionReady) {
     const first = imgs.local.slice(0, 6);
@@ -178,6 +231,19 @@ async function runAi(ctx, raw, imgs) {
       } catch (_) { /* 单批 OCR 失败不影响主结果 */ }
     }
     return result;
+  }
+  /* 本地 OCR 分支：有图、vision 未配、ocr.enabled → Tesseract 提取 + text 槽整理（P1L） */
+  if (imgs.local.length && !visionReady && cfg.ocr?.enabled) {
+    try {
+      const ocrFn = deps.ocrFn || ocrImages;
+      const ocr = await ocrFn(ctx, imgs.local, cfg.ocr.lang);
+      const prompt = P1L(raw.title, raw.desc, commentsTxt, subtitleTxt, buildOcrText(ocr));
+      const r = await ctx.ai.chatJson('text', [{ role: 'user', content: prompt }], { maxTokens: 2000 });
+      console.log(`[pipeline] 《${raw.title}》本地 OCR 完成（${ocr.filter(Boolean).length}/${imgs.local.length} 图有文字），text 槽整理`);
+      return { ...normalizeAi(r, isVideo, !!subtitleTxt), ocr: ocr.map(String).filter(Boolean) };
+    } catch (e) {
+      console.warn(`[pipeline] 本地 OCR 失败，回退 text 整理（无 OCR）: ${e.message}`);
+    }
   }
   if (imgs.local.length) {
     console.warn('[pipeline] vision 槽位未配置，图文笔记回退 text 整理（无 OCR）');
@@ -319,4 +385,7 @@ function createPipeline(ctx) {
   return { confirm, status };
 }
 
-module.exports = { createPipeline, runAi, STAGES, renderCommentsMd, CATEGORIES };
+module.exports = {
+  createPipeline, runAi, ocrImages, buildOcrText, P1L,
+  STAGES, renderCommentsMd, CATEGORIES
+};

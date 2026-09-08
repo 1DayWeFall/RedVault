@@ -41,6 +41,14 @@ async function extractText(ctx, abs, ext) {
     return String(data.text || '').slice(0, 8000);
   }
   if (IMG_EXT.has(ext)) {
+    /* 本地 OCR 优先（ocr.enabled 时免 vision 费用，纯提取图中文字）；失败/未开启落回 vision 槽 */
+    if (ctx.store.readConfig().ocr?.enabled) {
+      try {
+        const { ocrImages } = require('../services/pipeline');
+        const [txt] = await ocrImages(ctx, [{ abs }], ctx.store.readConfig().ocr.lang);
+        return String(txt || '').slice(0, 4000);
+      } catch (_) { /* 落回 vision */ }
+    }
     const b64 = await imageToBase64(abs);
     const r = await ctx.ai.chatJson('vision', [{ role: 'user', content: [
       { type: 'text', text: '提取这张图片中的关键信息要点，输出 JSON：{"text":"..."}' },

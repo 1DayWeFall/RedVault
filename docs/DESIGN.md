@@ -124,6 +124,8 @@ window.__INITIAL_STATE__.noteData.noteDetailMap[noteId].note
 
 **上报**：`GM_xmlhttpRequest POST http://127.0.0.1:3789/api/capture`，header `X-Capture-Token`；响应 409（重复）时面板显示「已在收件箱/已入库」。
 
+**v0.4 演进（收藏夹清单模式，当前主路径）**：`@match` 放宽到 `xiaohongshu.com/*`，hook fetch/XHR 只读吸收收藏列表接口响应（`note_id + xsec_token` 清单），面板驱动自动滚动翻页抓全量；正文/字幕/图片改由服务端 `POST /capture/list` 凭 token 抓详情页完成（限速 1.5~3s 抖动），上报前 `POST /capture/check` 增量过滤。**溯源链接续期**：小红书 `xsec_token` 约数天过期（过期后点「溯源原帖」跳登录/扫码页），check 携带 token 识别 stale、list 对已入库笔记仅刷新 frontmatter `url` 一行——重扫一次收藏夹即可复活全部链接，正文与备注不动。
+
 **悬浮面板**（右下角，小红书红描边小卡片）：
 
 - 状态机：`待检测 → 已提取主数据 → 评论抓取中 3/20 → 已上报 ✓ / 重复跳过 / 服务未启动`
@@ -220,6 +222,7 @@ pending → downloading_images → ai_processing → relating → writing → do
 1. **downloading_images**：Node 端 fetch 原图（带 `Referer: https://www.xiaohongshu.com`），存 `attachments/{note_id}-{seq}.jpg`；sharp 生成 `{note_id}-thumb.webp`（300px 瀑布流缩略图）。失败 → 保留外链，frontmatter 记 `images_remote`
 2. **ai_processing**：
    - 有图：sharp 压缩（长边 1280、质量 0.8）转 base64，视觉模型**一次合并调用**完成 OCR×N + 摘要 + 两级打标 + 标签 + 评论洞察（结构化 JSON，见 §9 P1）；图片 > 6 张时分批（每批 6 张，结果合并）
+   - 有图但 vision 未配置且本地 OCR 开启（设置页「本地 OCR」开关，`ocr.enabled`）：tesseract.js（chi_sim+eng，语言数据缓存 `data/ocr-cache`）逐图提取文字 → 文本模型按 P1L 整理（ocr 字段直供本地结果，AI 只做摘要/打标）——**免 vision 费用**；识别失败自动降级 P2，不阻塞
    - 无图（含视频笔记）：文本模型处理标题+正文+简介+评论（P2），视频笔记明确标注「视频未转写，内容基于简介与评论」
 3. **relating**：调 `relate.js` 评分（§5.7）
 4. **writing**：渲染模板 → vault 落盘 → 更新 index → inbox 条目置 `done` 并移除（`done` 记录留 log 摘要）
@@ -274,6 +277,8 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 | 方法 | 路径 | 说明 | 请求 → 响应要点 |
 |------|------|------|----------------|
 | POST | `/capture` | 脚本上报（header `X-Capture-Token`） | `{...raw}` → `201 {note_id}` / `409 重复` / `401 token 错误` |
+| POST | `/capture/check` | 增量查询：上报前先问哪些需要报（判重口径同 /capture/list 单一事实源 `classifyNote`） | `{items:[{note_id,xsec_token}]}`（≤1000；旧 `{note_ids}` 兼容）→ `{fresh:[新+failed 重采], stale:[已入库但库内 token 过期], total, skipped}`；stale 并入上报以续期链接；旧服务端（只认 note_ids）→ 脚本自动降级全量 |
+| POST | `/capture/list` | 收藏夹清单批量上报：服务端逐条抓详情页（限速抖动、瞬时失败补抓一次）后入箱；failed 豁免判重重采；已入库笔记若清单 token 较新 → 仅刷新 frontmatter `url` 续期溯源链接（不动正文/备注） | `{notes:[{note_id,xsec_token,title,...}]}`（≤20/批）→ `201 {results:[{note_id, status: inbox\|failed\|duplicate\|refreshed\|invalid}]}` |
 | GET | `/inbox` | 收件箱列表（含 status/process） | → 条目数组（raw 裁剪 desc 至 200 字） |
 | GET | `/inbox/:id` | 完整预览 | → 单条完整 raw |
 | DELETE | `/inbox/:id` | 删除单条 | → `204` |

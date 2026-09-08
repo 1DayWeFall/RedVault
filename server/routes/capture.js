@@ -3,6 +3,10 @@
 /**
  * 采集上报路由（DESIGN §5.1 / §6）
  * - POST /api/capture       单条上报（旧入口，保留兼容）
+ * - POST /api/capture/check 增量查询：油猴脚本上报前先问哪些 note_id 需要上报
+ *                           （新增 + 收件箱 failed 重采候选），已入库/已入箱的跳过；
+ *                           新格式 {items:[{note_id,xsec_token}]} 额外返回 stale：
+ *                           已入库但清单 token 较新（溯源链接过期）需重报刷新
  * - POST /api/capture/list  收藏夹清单批量上报：油猴脚本只发清单（note_id + xsec_token），
  *                           服务端逐条用 xsec_token 抓详情页（限速 1.5~3s 随机抖动），
  *                           解析 __INITIAL_STATE__ 取正文/字幕/图片后判重入箱。
@@ -46,6 +50,46 @@ module.exports = function captureRoutes(ctx) {
     }
   });
 
+  /* ── 增量查询：油猴脚本上报前先问服务端，只上报新增与 failed 重采候选（判重口径同 /capture/list） ── */
+  router.post('/capture/check', (req, res, next) => {
+    try {
+      const token = req.get('X-Capture-Token');
+      const cfg = ctx.store.readConfig();
+      if (!cfg.capture?.token || token !== cfg.capture.token) {
+        throw { status: 401, code: 'BAD_TOKEN', message: 'X-Capture-Token 缺失或不正确' };
+      }
+
+      /* 兼容两种格式：旧 {note_ids:[id]}（只算 fresh）；新 {items:[{note_id,xsec_token}]}
+         （额外识别 stale：已入库但清单 token 较新 → 重报以刷新溯源链接）。两者均须非空 */
+      const body = req.body || {};
+      const legacy = Array.isArray(body.note_ids) && body.note_ids.length > 0
+        ? body.note_ids.map((id) => ({ note_id: id })) : null;
+      const items = (Array.isArray(body.items) && body.items.length > 0) ? body.items : legacy;
+      if (!items) {
+        throw { status: 400, code: 'BAD_PAYLOAD', message: 'note_ids/items 须为非空数组' };
+      }
+      if (items.length > 1000) {
+        throw { status: 413, code: 'TOO_MANY', message: '单次最多查询 1000 个 note_id' };
+      }
+
+      const fresh = [];
+      const stale = [];
+      const seen = new Set();
+      for (const it of items) {
+        const id = String((it && it.note_id) || '').trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        if (classifyNote(ctx, id) !== 'known') { fresh.push(id); continue; }
+        const incoming = String((it && it.xsec_token) || '').trim();
+        const stored = vaultTokenOf(ctx, id);
+        if (incoming && stored && stored.token !== incoming) stale.push(id);
+      }
+      res.json({ fresh, stale, total: seen.size, skipped: seen.size - fresh.length - stale.length });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   /* ── 收藏夹清单批量上报：服务端负责详情抓取 ── */
   router.post('/capture/list', async (req, res, next) => {
     try {
@@ -72,13 +116,23 @@ module.exports = function captureRoutes(ctx) {
           continue;
         }
 
-        /* 判重：索引已有 → 跳过；收件箱非 failed → 跳过；
-           收件箱 failed → 豁免，视为重采（用新 xsec_token 重抓覆盖，重扫即愈） */
-        const existing = ctx.store.readInbox().find((x) => x.note_id === noteId);
-        const refeed = !!existing && existing.status === 'failed';
-        if (ctx.store.readIndex().notes.some((n) => n.note_id === noteId)
-          || (existing && !refeed)) {
-          results.push({ note_id: noteId, status: 'duplicate' });
+        /* 判重口径见 classifyNote：known → 链接续期（token 变了只刷 frontmatter url 一行，
+           不重抓详情/不动正文备注）；refeed → 豁免重采（新 token 重抓覆盖，重扫即愈） */
+        const state = classifyNote(ctx, noteId);
+        const refeed = state === 'refeed';
+        if (state === 'known') {
+          const stored = vaultTokenOf(ctx, noteId);
+          if (stored && stored.token !== xsec) {
+            try {
+              ctx.vault.updateNoteFile(stored.file, { url: exploreUrl(noteId, xsec) });
+              console.log(`[capture/list] 溯源链接已刷新: ${noteId}`);
+              results.push({ note_id: noteId, status: 'refreshed' });
+            } catch (e) {
+              results.push({ note_id: noteId, status: 'duplicate', error: '链接刷新失败: ' + (e.message || e) });
+            }
+          } else {
+            results.push({ note_id: noteId, status: 'duplicate' });
+          }
           continue;
         }
 
@@ -148,6 +202,34 @@ module.exports = function captureRoutes(ctx) {
 
   return router;
 };
+
+/** 判重公共口径（/capture/list 与 /capture/check 共用，单一事实源）：
+ *  - 索引已有 → 'known'（已入库）
+ *  - 收件箱已有非 failed 条目 → 'known'（已入箱）
+ *  - 收件箱 failed → 'refeed'（豁免判重：上报后用新 xsec_token 重采覆盖）
+ *  - 否则 → 'new' */
+function classifyNote(ctx, noteId) {
+  if (ctx.store.readIndex().notes.some((n) => n.note_id === noteId)) return 'known';
+  const existing = ctx.store.readInbox().find((x) => x.note_id === noteId);
+  if (!existing) return 'new';
+  return existing.status === 'failed' ? 'refeed' : 'known';
+}
+
+/** 已入库笔记的库内溯源 token（check/list 共用）：
+ *  返回 { file, token }——token 从 frontmatter url 的 xsec_token 参数解码比对；
+ *  url 无 token 或文件读取失败 → token 为 null（视为可刷新）；未入库 → null */
+function vaultTokenOf(ctx, noteId) {
+  if (!ctx.vault) return null;
+  const meta = ctx.store.readIndex().notes.find((n) => n.note_id === noteId);
+  if (!meta) return null;
+  let token = null;
+  try {
+    const { fm } = ctx.vault.readNoteFile(meta.file);
+    const m = /[?&]xsec_token=([^&\s]+)/.exec(String(fm.url || ''));
+    if (m) { try { token = decodeURIComponent(m[1]); } catch { token = m[1]; } }
+  } catch { /* 文件损坏/缺失 → 视为可刷新 */ }
+  return { file: meta.file, token };
+}
 
 /** 详情抓取失败时的兜底 raw：保留清单信息 + xsec_token 溯源，供收件箱查看/删除/重采 */
 function fallbackRaw(item) {

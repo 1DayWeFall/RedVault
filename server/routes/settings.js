@@ -44,6 +44,7 @@ module.exports = function settingsRoutes(ctx) {
         text: { ...cfg.ai.text, apiKey: '' },
         vision: { ...cfg.ai.vision, apiKey: '' }
       },
+      ocr: cfg.ocr,
       // capture.token 返回明文：本地服务仅绑 127.0.0.1，供用户复制进油猴脚本
       capture: { commentCount: cfg.capture.commentCount, token: cfg.capture.token },
       vaultPath: cfg.vaultPath
@@ -70,6 +71,10 @@ module.exports = function settingsRoutes(ctx) {
       }
       if (body.capture?.commentCount !== undefined) {
         cfg.capture.commentCount = Math.max(1, Math.min(100, Number(body.capture.commentCount) || 20));
+      }
+      if (body.ocr) {
+        if (body.ocr.enabled !== undefined) cfg.ocr.enabled = !!body.ocr.enabled;
+        if (body.ocr.lang !== undefined) cfg.ocr.lang = String(body.ocr.lang).trim() || 'chi_sim+eng';
       }
       if (body.capture?.resetToken === true) {
         cfg.capture.token = 'rv_' + crypto.randomBytes(12).toString('hex');

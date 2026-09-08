@@ -446,7 +446,7 @@ async function openDetail(id) {
             <span>@${esc(n.author)}</span><span class="dot"></span>
             <span>发布 ${esc(n.published_at)}</span><span class="dot"></span>
             <span>♥ ${fmtK(n.liked)}</span>
-            <a class="src-btn" href="${esc(n.url)}" target="_blank" rel="noopener">
+            <a class="src-btn" href="${esc(n.url)}" target="_blank" rel="noopener" title="链接由小红书授权，约数天有效；若打开显示扫码/登录页：在小红书重扫一次收藏夹即可刷新全部链接">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
               溯源原帖</a>`}
         </div>
@@ -711,14 +711,34 @@ function renderPipeline(q) {
 function hidePipeline() { $("#pipelineBar").hidden = true; $("#pipelineBar").classList.remove("open"); $("#pipelinePanel").hidden = true; }
 
 /* ── 多选浮栏 & 合成 ── */
+/** 当前视图可参与多选的 id（与渲染口径一致：笔记库=筛选+搜索+排序结果，收件箱=全部条目） */
+function visibleSelectIds() {
+  return App.view === "library" ? filteredNotes().map((n) => n.id) : INBOX.map((x) => x.id);
+}
+
+/** 一键全选/全不选：作用于当前可见列表，已全选中则清空 */
+function toggleSelectAll() {
+  const ids = visibleSelectIds();
+  if (!ids.length) return;
+  if (ids.every((id) => App.selected.has(id))) App.selected.clear();
+  else ids.forEach((id) => App.selected.add(id));
+  if (App.view === "library") renderLibrary(); else renderInbox();
+  updateSelectBar();
+}
+
 function updateSelectBar() {
   const bar = $("#selectBar");
-  bar.hidden = !(App.selectMode && App.selected.size > 0);
+  bar.hidden = !App.selectMode; // 进入多选即显示（未选中时也可一键全选）
   $("#selectCount").textContent = App.selected.size;
   const lib = App.view === "library";
-  $("#btnOpenSynthesize").hidden = !lib;
-  $("#btnBatchConfirm").hidden = lib;
-  $("#btnBatchDelete").hidden = lib;
+  const has = App.selected.size > 0;
+  $("#btnOpenSynthesize").hidden = !lib || !has;
+  $("#btnBatchConfirm").hidden = lib || !has;
+  $("#btnBatchDelete").hidden = lib || !has;
+  const ids = visibleSelectIds();
+  const btnAll = $("#btnToggleAll");
+  btnAll.hidden = !ids.length;
+  btnAll.textContent = ids.length && ids.every((id) => App.selected.has(id)) ? "全不选" : "全选";
   if (lib) {
     $("#selectCost").textContent = `≈ ¥${(App.selected.size * 0.015 + 0.02).toFixed(2)}`;
   } else {
@@ -835,6 +855,7 @@ async function openSettings() {
   const t = cfg?.ai?.text || {}, v = cfg?.ai?.vision || {};
   const commentCount = cfg?.capture?.commentCount || 20;
   const ccOn = (n) => (n === commentCount ? ' class="on"' : '');
+  const ocrSel = (n) => (n === (cfg?.ocr?.enabled ? "1" : "0") ? ' class="on"' : '');
 
   $("#modalBox").innerHTML = `
     <div class="modal-head"><h3>设置</h3><button class="close-x" data-close>×</button></div>
@@ -853,6 +874,7 @@ async function openSettings() {
           <div class="field"><label>API Key</label><input type="text" data-slot="vision-key" value="" placeholder="留空不修改，重新输入以更换"></div>
           <div class="field"><label>模型</label><input type="text" data-slot="vision-model" value="${esc(v.model)}" placeholder="glm-4v-plus"></div>
         </div></div>
+      <div class="kv-row" title="开启后：图片文字由本地 Tesseract 识别（免费离线，首次联网下载语言数据约几十 MB），摘要/分类仍走便宜的文本模型，视觉模型可留空。对艺术字/手写体的识别弱于视觉大模型"><span class="k">本地 OCR（免费 · 免视觉 API）</span><span class="v"><span class="seg" id="segOcr"><button data-v="1"${ocrSel("1")}>开启</button><button data-v="0"${ocrSel("0")}>关闭</button></span></span></div>
       <div class="kv-row"><span class="k">评论抓取条数</span><span class="v"><span class="seg" id="segComment"><button data-v="10"${ccOn(10)}>10</button><button data-v="20"${ccOn(20)}>20</button><button data-v="50"${ccOn(50)}>50</button></span></span></div>
       <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code id="tokenCode">${esc(cfg?.capture?.token || "")}</code><button class="link-btn" id="btnCopyToken">复制</button><button class="link-btn" id="btnToken">重置</button></span></div>
       <div class="kv-row"><span class="k">vault 路径</span><span class="v"><input type="text" id="vaultPathInput" value="${esc(cfg?.vaultPath || "vault")}" style="width:100%;box-sizing:border-box" placeholder="vault"></span></div>
@@ -862,6 +884,7 @@ async function openSettings() {
   $("#overlayModal").hidden = false;
 
   $$("#segComment button").forEach((b) => b.onclick = () => { $$("#segComment button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); });
+  $$("#segOcr button").forEach((b) => b.onclick = () => { $$("#segOcr button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); });
 
   $$("[data-test]").forEach((b) => b.onclick = async () => {
     b.disabled = true; b.textContent = "测试中…";
@@ -914,6 +937,7 @@ async function openSettings() {
         vision: { baseUrl: val("[data-slot=vision-base]"), apiKey: val("[data-slot=vision-key]"), model: val("[data-slot=vision-model]") }
       },
       capture: { commentCount: Number(($$("#segComment button.on")[0]?.dataset.v) || 20) },
+      ocr: { enabled: $$("#segOcr button.on")[0]?.dataset.v === "1" },
       vaultPath: ($("#vaultPathInput")?.value ?? "").trim()
     };
     try {
@@ -1059,6 +1083,7 @@ async function boot() {
     toast("已开始导出 vault（.md + attachments），含全部笔记");
   };
   $("#btnCancelSelect").onclick = exitSelectMode;
+  $("#btnToggleAll").onclick = toggleSelectAll;
   $("#btnOpenSynthesize").onclick = openSynthesize;
   $("#btnBatchConfirm").onclick = batchConfirmSelected;
   $("#btnBatchDelete").onclick = batchDeleteSelected;
