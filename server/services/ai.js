@@ -9,6 +9,8 @@
  * - 成本估算：chars/1.6 估 token，priceIn/Out 按每百万 token 计（OpenAI 惯例），累计入内存
  */
 
+const { httpError } = require('../lib/http-error');
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 估 token：按 1.6 字符/中文 token 的粗略折算 */
@@ -46,7 +48,7 @@ function createAi(ctx) {
   function slotCfg(slot) {
     const cfg = ctx.store.readConfig().ai?.[slot];
     if (!cfg || !cfg.apiKey || !cfg.baseUrl || !cfg.model) {
-      throw { status: 400, code: 'NO_AI_CONFIG', message: `${slot} 槽位未配置（设置页填写 baseUrl / apiKey / model）` };
+      throw httpError(400, 'NO_AI_CONFIG', `${slot} 槽位未配置（设置页填写 baseUrl / apiKey / model）`);
     }
     return cfg;
   }
@@ -74,15 +76,20 @@ function createAi(ctx) {
         body: JSON.stringify(body)
       });
     } catch (e) {
-      throw { code: 'AI_NETWORK', message: 'AI 请求网络错误: ' + (e.cause?.code || e.message) };
+      countCost(slot, JSON.stringify(messages), ''); // 失败也计入输入开销（M7：重试成本不再隐形）
+      throw httpError(502, 'AI_NETWORK', 'AI 请求网络错误: ' + (e.cause?.code || e.message), { cause: e });
     }
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
-      throw { status: r.status, code: 'AI_HTTP_' + r.status, message: `AI 请求失败 ${r.status}: ${detail.slice(0, 200)}` };
+      countCost(slot, JSON.stringify(messages), '');
+      throw httpError(r.status, 'AI_HTTP_' + r.status, `AI 请求失败 ${r.status}: ${detail.slice(0, 200)}`);
     }
     const j = await r.json();
     const content = j.choices?.[0]?.message?.content;
-    if (content == null || content === '') throw { code: 'AI_EMPTY', message: 'AI 返回内容为空' };
+    if (content == null || content === '') {
+      countCost(slot, JSON.stringify(messages), '');
+      throw httpError(502, 'AI_EMPTY', 'AI 返回内容为空');
+    }
     countCost(slot, JSON.stringify(messages), String(content));
     return String(content);
   }
@@ -110,7 +117,7 @@ function createAi(ctx) {
     return withRetry(async () => {
       const content = await request(slot, messages, { ...opts, json: true });
       const parsed = parseJson(content);
-      if (!parsed) throw { code: 'AI_JSON_PARSE', message: 'AI 返回无法解析为 JSON' };
+      if (!parsed) throw httpError(502, 'AI_JSON_PARSE', 'AI 返回无法解析为 JSON');
       return parsed;
     });
   }

@@ -1,6 +1,6 @@
 {
   "name": "redvault",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "薯藏 RedVault —— 小红书收藏 → AI 整理 → Obsidian 本地知识库",
   "private": true,
   "scripts": {

@@ -16,8 +16,6 @@ const path = require('path');
 const { renderNoteMd, safeTitle } = require('./vault');
 const { relatedNotes } = require('./relate');
 
-const STAGES = ['downloading_images', 'ai_processing', 'relating', 'writing'];
-
 const CATEGORIES = ['美食', '健康', '穿搭', '美妆', '家居', '旅行', '学习', '职场', '育儿', '科技', '理财', '运动', '其他'];
 
 /* ── Prompt（DESIGN §9 P1/P2） ── */
@@ -108,7 +106,10 @@ async function ocrImages(ctx, list, lang) {
     try {
       const { data } = await ocrWorker.recognize(l.abs);
       out.push(String(data?.text || '').replace(/\s+/g, ' ').trim());
-    } catch (_) { out.push(''); }
+    } catch (e) {
+      console.warn(`[pipeline] OCR 单图失败，按无文字处理: ${e.message}`);
+      out.push('');
+    }
   }
   return out;
 }
@@ -155,7 +156,9 @@ async function downloadImages(raw, noteId, attachDir) {
           await sharp(buf).rotate().resize({ width: 300, withoutEnlargement: true })
             .webp({ quality: 75 }).toFile(path.join(attachDir, `${noteId}-thumb.webp`));
           thumb = `attachments/${noteId}-thumb.webp`;
-        } catch (_) {}
+        } catch (e) {
+          console.warn(`[pipeline] ${noteId} 缩略图生成失败（不影响入库）: ${e.message}`);
+        }
       }
     } catch (e) {
       remote.push(urls[i]);
@@ -173,7 +176,9 @@ async function imageToBase64(abs) {
     try {
       buf = await sharp(buf).rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 80 }).toBuffer();
-    } catch (_) {}
+    } catch (e) {
+      console.warn(`[pipeline] 图片压缩失败，改用原图: ${e.message}`);
+    }
   }
   return `data:${mime};base64,` + buf.toString('base64');
 }
@@ -228,7 +233,9 @@ async function runAi(ctx, raw, imgs, deps = {}) {
       try {
         const r = await ctx.ai.chatJson('vision', [{ role: 'user', content: bContent }], { maxTokens: 2000 });
         if (Array.isArray(r.ocr)) result.ocr = result.ocr.concat(r.ocr.map(String));
-      } catch (_) { /* 单批 OCR 失败不影响主结果 */ }
+      } catch (e) {
+        console.warn(`[pipeline] 第 ${Math.floor(i / 6) + 1} 批图片 OCR 失败，不影响主结果: ${e.message}`);
+      }
     }
     return result;
   }
@@ -256,6 +263,9 @@ async function runAi(ctx, raw, imgs, deps = {}) {
 
 function createPipeline(ctx) {
   const queue = [];
+  /* 最近失败条目（M7）：失败项此前被 shift 出队列后前端进度条就看不到它了 */
+  const failures = [];
+  const FAILED_KEEP = 50;
   let running = false;
 
   async function confirm(ids) {
@@ -284,6 +294,8 @@ function createPipeline(ctx) {
         process: { stage: item.stage, error: item.error, finished_at: new Date().toISOString() }
       });
       console.error(`[pipeline] ${item.note_id} 失败于 ${item.stage}: ${item.error}`);
+      failures.push({ note_id: item.note_id, stage: item.stage, error: item.error, at: new Date().toISOString() });
+      if (failures.length > FAILED_KEEP) failures.shift();
     }
     running = false;
     if (queue.length) runNext();
@@ -323,7 +335,11 @@ function createPipeline(ctx) {
       category: ai?.category || '', subcategory: ai?.subcategory || '',
       tags: ai?.tags?.length ? ai.tags : raw.tags || []
     };
-    const related = relatedNotes(target, ctx.store.readIndex().notes);
+    const index = ctx.store.readIndex().notes;
+    const related = relatedNotes(target, index);
+    /* 正文双链按文件名（Obsidian 解析 [[文件名]]，note_id 仅存 frontmatter 供系统追踪） */
+    const fileOf = new Map(index.map((n) => [n.note_id, n.file]));
+    const relatedLinks = related.map((id) => fileOf.get(id)).filter(Boolean).map((f) => f.replace(/\.md$/, ''));
 
     /* 4. writing */
     item.stage = 'writing';
@@ -357,7 +373,7 @@ function createPipeline(ctx) {
       ocr: ai?.ocr || [],
       subtitle: hasSubtitle ? subtitleText : '',
       comments: commentsBlock.join('\n'),
-      related, attachments: '', remark: ''
+      related: relatedLinks, attachments: '', remark: ''
     });
     const file = ctx.vault.writeNoteFile(safeTitle(raw.title), md);
     ctx.store.upsertIndexNote({
@@ -377,6 +393,8 @@ function createPipeline(ctx) {
     const usage = ctx.ai?.usage() || {};
     return {
       queue: queue.map((q) => ({ ...q })),
+      failed: failures.slice(-10),
+      failedTotal: failures.length,
       sessionCost: Math.round(usage.cost * 10000) / 10000,
       tokens: { in: usage.totalIn || 0, out: usage.totalOut || 0 }
     };
@@ -387,5 +405,5 @@ function createPipeline(ctx) {
 
 module.exports = {
   createPipeline, runAi, ocrImages, buildOcrText, P1L,
-  STAGES, renderCommentsMd, CATEGORIES
+  renderCommentsMd, CATEGORIES
 };

@@ -19,6 +19,7 @@ const express = require('express');
 const { normalizeCapture, toInt } = require('../lib/capture-normalize');
 const { fetchNoteDetail, exploreUrl, sleep } = require('../services/fetch-note');
 const { vaultTokenOf } = require('../lib/source-link');
+const { httpError, toHttpError } = require('../lib/http-error');
 
 module.exports = function captureRoutes(ctx) {
   const router = express.Router();
@@ -28,7 +29,7 @@ module.exports = function captureRoutes(ctx) {
       const token = req.get('X-Capture-Token');
       const cfg = ctx.store.readConfig();
       if (!cfg.capture?.token || token !== cfg.capture.token) {
-        throw { status: 401, code: 'BAD_TOKEN', message: 'X-Capture-Token 缺失或不正确' };
+        throw httpError(401, 'BAD_TOKEN', 'X-Capture-Token 缺失或不正确');
       }
 
       const { note_id, raw } = normalizeCapture(req.body);
@@ -47,7 +48,7 @@ module.exports = function captureRoutes(ctx) {
       console.log(`[capture] 入收件箱: ${note_id} 《${raw.title}》(评论 ${raw.comments.length} 条)`);
       res.status(201).json({ note_id });
     } catch (err) {
-      next(err);
+      next(toHttpError(err));
     }
   });
 
@@ -57,7 +58,7 @@ module.exports = function captureRoutes(ctx) {
       const token = req.get('X-Capture-Token');
       const cfg = ctx.store.readConfig();
       if (!cfg.capture?.token || token !== cfg.capture.token) {
-        throw { status: 401, code: 'BAD_TOKEN', message: 'X-Capture-Token 缺失或不正确' };
+        throw httpError(401, 'BAD_TOKEN', 'X-Capture-Token 缺失或不正确');
       }
 
       /* 兼容两种格式：旧 {note_ids:[id]}（只算 fresh）；新 {items:[{note_id,xsec_token}]}
@@ -67,10 +68,10 @@ module.exports = function captureRoutes(ctx) {
         ? body.note_ids.map((id) => ({ note_id: id })) : null;
       const items = (Array.isArray(body.items) && body.items.length > 0) ? body.items : legacy;
       if (!items) {
-        throw { status: 400, code: 'BAD_PAYLOAD', message: 'note_ids/items 须为非空数组' };
+        throw httpError(400, 'BAD_PAYLOAD', 'note_ids/items 须为非空数组');
       }
       if (items.length > 1000) {
-        throw { status: 413, code: 'TOO_MANY', message: '单次最多查询 1000 个 note_id' };
+        throw httpError(413, 'TOO_MANY', '单次最多查询 1000 个 note_id');
       }
 
       const fresh = [];
@@ -87,7 +88,7 @@ module.exports = function captureRoutes(ctx) {
       }
       res.json({ fresh, stale, total: seen.size, skipped: seen.size - fresh.length - stale.length });
     } catch (err) {
-      next(err);
+      next(toHttpError(err));
     }
   });
 
@@ -97,15 +98,15 @@ module.exports = function captureRoutes(ctx) {
       const token = req.get('X-Capture-Token');
       const cfg = ctx.store.readConfig();
       if (!cfg.capture?.token || token !== cfg.capture.token) {
-        throw { status: 401, code: 'BAD_TOKEN', message: 'X-Capture-Token 缺失或不正确' };
+        throw httpError(401, 'BAD_TOKEN', 'X-Capture-Token 缺失或不正确');
       }
 
       const notes = req.body && req.body.notes;
       if (!Array.isArray(notes) || notes.length === 0) {
-        throw { status: 400, code: 'BAD_PAYLOAD', message: 'notes 须为非空数组' };
+        throw httpError(400, 'BAD_PAYLOAD', 'notes 须为非空数组');
       }
       if (notes.length > 20) {
-        throw { status: 413, code: 'TOO_MANY', message: '单批最多 20 条，请分批上报' };
+        throw httpError(413, 'TOO_MANY', '单批最多 20 条，请分批上报');
       }
 
       const results = [];
@@ -197,7 +198,7 @@ module.exports = function captureRoutes(ctx) {
 
       res.status(201).json({ results });
     } catch (err) {
-      next(err);
+      next(toHttpError(err));
     }
   });
 

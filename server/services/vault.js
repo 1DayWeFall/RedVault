@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const matter = require('gray-matter');
 const yaml = require('js-yaml');
+const { httpError } = require('../lib/http-error');
 
 /* ── 区块定义（顺序固定，§8 模板） ── */
 const SECTIONS = {
@@ -160,7 +161,7 @@ function createVault(vaultDir) {
 
       for (const [key, val] of Object.entries(sectionPatch || {})) {
         const next = replaceSection(body, key, val);
-        if (next === null) throw { status: 422, code: 'SECTION_NOT_FOUND', message: `笔记 ${file} 缺少区块 sec:${key}` };
+        if (next === null) throw httpError(422, 'SECTION_NOT_FOUND', `笔记 ${file} 缺少区块 sec:${key}`);
         body = next;
       }
       const out = buildFrontmatter(fm) + '\n' + body.replace(/^\n+/, '\n');
@@ -202,7 +203,12 @@ function createVault(vaultDir) {
       let cleaned = 0;
       for (const f of fs.readdirSync(attachDir)) {
         if (f.startsWith(noteId + '-')) {
-          try { fs.unlinkSync(path.join(attachDir, f)); cleaned++; } catch (_) {}
+          try {
+            fs.unlinkSync(path.join(attachDir, f));
+            cleaned++;
+          } catch (e) {
+            console.warn(`[vault] 附件清理失败（${f}）: ${e.message}`);
+          }
         }
       }
       return cleaned;
@@ -239,12 +245,44 @@ function migrateVault(oldDir, newDir) {
     }
     return { migrated };
   } catch (e) {
-    throw { status: 400, code: 'MIGRATE_FAILED', message: 'vault 迁移失败：' + explain(e), cause: e };
+    throw httpError(400, 'MIGRATE_FAILED', 'vault 迁移失败：' + explain(e), { cause: e });
   }
 }
 
+/**
+ * 启动自检：index ↔ vault 一致性（DESIGN §5.3「index 与 vault 不一致时以 vault 扫描重建」）
+ * - 快路径：vault 下 .md 文件名集合与 index 完全一致 → 不重建，避免每次启动全量读盘
+ * - 不一致（vault 新增/删除了文件、index 指向已不存在的文件、index 为空而 vault 非空）→ 以 vault 为准重建
+ * 返回 { rebuilt, files, indexed, added, removed, notes }
+ */
+function reconcileIndex({ store, vault, force = false, log = true }) {
+  const files = fs.readdirSync(vault.dir).filter((f) => f.endsWith('.md'));
+  const indexed = (store.readIndex().notes || []).map((n) => n.file).filter(Boolean);
+  const fileSet = new Set(files);
+  const indexSet = new Set(indexed);
+  const added = files.filter((f) => !indexSet.has(f));
+  const removed = indexed.filter((f) => !fileSet.has(f));
+
+  const summary = { rebuilt: false, files: files.length, indexed: indexed.length, added: added.length, removed: removed.length, notes: indexed.length };
+
+  if (!force && added.length === 0 && removed.length === 0) {
+    if (log) console.log(`[RedVault] index 自检一致：${files.length} 篇笔记`);
+    return summary;
+  }
+
+  const notes = vault.rebuildIndexMeta();
+  store.saveIndex({ notes });
+  summary.rebuilt = true;
+  summary.notes = notes.length;
+  if (log) {
+    console.warn(`[RedVault] index 与 vault 不一致，已按 vault 重建：vault ${files.length} 篇 / index ${indexed.length} 条`
+      + `（新增 ${added.length}、缺失 ${removed.length}）→ 重建后 ${notes.length} 条`);
+  }
+  return summary;
+}
+
 module.exports = {
-  SECTIONS, SYNTH_SECTIONS, createVault, migrateVault,
+  SECTIONS, SYNTH_SECTIONS, createVault, migrateVault, reconcileIndex,
   safeTitle, uniqueFileName, buildFrontmatter,
   renderNoteMd, renderSynthMd, replaceSection, readSection, wrap, section
 };

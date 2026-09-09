@@ -1,9 +1,11 @@
 'use strict';
 
+const { httpError } = require('./http-error');
+
 /**
  * 油猴上报 payload → 标准收件箱 raw 结构（DESIGN §5.1 → §5.3）
  * 纯函数无 IO；对小红书页面版本差异做多路径字段容错。
- * 校验失败抛 { status, code, message }（Express 错误中间件可直接消费）。
+ * 校验失败抛 HttpError（Express 错误中间件可直接消费）。
  */
 
 const toInt = (v, dft = 0) => {
@@ -35,9 +37,7 @@ const toIso = (v) => {
 const firstString = (...vals) => vals.find((v) => typeof v === 'string' && v.trim() !== '') || '';
 
 /** 单行 HTML 剥离：删标签 + 空白压平（title / 评论等单行场景，保持原语义） */
-const stripHtmlInline = (s) => String(s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-/* 兼容旧名引用 */
-const stripHtml = stripHtmlInline;
+const stripHtml = (s) => String(s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 
 /** 常见 HTML 实体解码（正文场景够用，不引入完整实体表） */
 const decodeEntities = (s) => String(s || '')
@@ -99,19 +99,19 @@ const normalizeComment = (c) => {
  */
 function normalizeCapture(payload) {
   if (!payload || typeof payload !== 'object') {
-    throw { status: 400, code: 'BAD_PAYLOAD', message: '上报体必须是 JSON 对象' };
+    throw httpError(400, 'BAD_PAYLOAD', '上报体必须是 JSON 对象');
   }
   // 多路径容错：脚本可能直接发 note，或包在 payload.note / payload.data 里
   const note = payload.note || payload.data || payload;
   const noteId = firstString(payload.note_id, note.noteId, note.note_id, note.id);
-  if (!noteId) throw { status: 400, code: 'MISSING_NOTE_ID', message: '缺少 note_id' };
+  if (!noteId) throw httpError(400, 'MISSING_NOTE_ID', '缺少 note_id');
 
   const desc = cleanDesc(firstString(note.desc, note.content, note.description));
   /* title 兜底：取正文首个非空行前 50 字，超长以 … 结尾 */
   const firstLine = desc.split('\n').find((l) => l.trim()) || '';
   const fallbackTitle = firstLine.length > 50 ? firstLine.slice(0, 50) + '…' : firstLine;
-  const title = stripHtmlInline(firstString(note.title, note.displayTitle)) || fallbackTitle;
-  if (!title) throw { status: 422, code: 'EMPTY_CONTENT', message: '标题与正文均为空，无法入库' };
+  const title = stripHtml(firstString(note.title, note.displayTitle)) || fallbackTitle;
+  if (!title) throw httpError(422, 'EMPTY_CONTENT', '标题与正文均为空，无法入库');
 
   const tagList = Array.isArray(note.tagList)
     ? note.tagList.map((t) => (typeof t === 'string' ? t : t?.name)).filter(Boolean)
@@ -177,4 +177,4 @@ function normalizeCapture(payload) {
   return { note_id: String(noteId), raw };
 }
 
-module.exports = { normalizeCapture, toInt, toIso, stripHtml, stripHtmlInline, cleanDesc, extractHashTags };
+module.exports = { normalizeCapture, toInt, toIso, stripHtml, cleanDesc, extractHashTags };

@@ -748,30 +748,34 @@ function pollPipeline() {
     try { st = await api("/pipeline/status"); } catch (e) { return; }
     App.sessionCost = st.sessionCost || App.sessionCost;
     const q = st.queue || [];
+    PIPE.failed = st.failed || [];       // M7：失败项此前出队即消失，前端完全看不到
     if (!q.length && !PIPE.expected) return;
     if (!q.length) {
       clearInterval(PIPE.timer); PIPE.timer = null; PIPE.expected = 0;
+      const failedCount = PIPE.failed.length;
       $("#pipelineLabel").textContent = "处理完成";
-      $("#pipelineCount").textContent = "";
+      $("#pipelineCount").textContent = failedCount ? `${failedCount} 条失败` : "";
       setTimeout(async () => {
         await loadAll();
         if (App.view === "library") renderLibrary();
         if (App.view === "inbox") renderInbox();
         renderSidebar();
         hidePipeline();
-        toast("管线处理完成，笔记库已刷新", "ok");
+        toast(failedCount ? `处理完成，${failedCount} 条失败（收件箱保留断点，可展开查看原因后重试）` : "管线处理完成，笔记库已刷新",
+          failedCount ? "err" : "ok");
+        PIPE.failed = [];
       }, 800);
       return;
     }
-    renderPipeline(q);
+    renderPipeline(q, PIPE.failed);
   }, 1200);
 }
 
 /* 服务端 stage → 4 点进度映射（writing 为 M3 主阶段，M4 细化） */
-function renderPipeline(q) {
+function renderPipeline(q, failed = []) {
   const bar = $("#pipelineBar");
   bar.hidden = false;
-  const total = q.length;
+  const total = q.length + failed.length;
   const done = q.filter((x) => x.status === "done" || x.status === "skipped").length;
   $("#pipelineLabel").textContent = done >= total ? "处理完成" : "AI 处理中";
   $("#pipelineCount").textContent = `${done}/${total}`;
@@ -782,6 +786,13 @@ function renderPipeline(q) {
       <span class="pl-title">${esc(title || x.note_id)}</span>
       <span class="pl-stage">${STAGES.map((s, i) => `<i class="${i < stageIdx ? (stageIdx >= STAGES.length ? "ok" : "on") : ""}" title="${s}"></i>`).join("")}</span>
       <span style="font-size:11px;color:${stageIdx >= STAGES.length ? "var(--ok)" : x.status === "failed" ? "var(--red)" : "var(--ink2)"};min-width:52px;text-align:right">${x.status === "failed" ? "失败 ↺" : stageIdx >= STAGES.length ? "完成 ✓" : STAGES[stageIdx]}</span>
+    </div>`;
+  }).join("") + (failed || []).map((f) => {
+    const title = (INBOX.find((i) => i.id === f.note_id) || {}).title;
+    return `<div class="pl-item" title="${esc(f.error || "")}">
+      <span class="pl-title">${esc(title || f.note_id)}</span>
+      <span class="pl-stage"></span>
+      <span style="font-size:11px;color:var(--red);min-width:52px;text-align:right">失败 ↺</span>
     </div>`;
   }).join("");
 }
@@ -930,8 +941,6 @@ async function openSettings() {
   let cfg = null;
   try { cfg = await api("/settings"); } catch (e) { toast(e.message || "读取设置失败", "err"); }
   const t = cfg?.ai?.text || {}, v = cfg?.ai?.vision || {};
-  const commentCount = cfg?.capture?.commentCount || 20;
-  const ccOn = (n) => (n === commentCount ? ' class="on"' : '');
   const ocrSel = (n) => (n === (cfg?.ocr?.enabled ? "1" : "0") ? ' class="on"' : '');
 
   $("#modalBox").innerHTML = `
@@ -952,15 +961,13 @@ async function openSettings() {
           <div class="field"><label>模型</label><input type="text" data-slot="vision-model" value="${esc(v.model)}" placeholder="glm-4v-plus"></div>
         </div></div>
       <div class="kv-row" title="开启后：图片文字由本地 Tesseract 识别（免费离线，首次联网下载语言数据约几十 MB），摘要/分类仍走便宜的文本模型，视觉模型可留空。对艺术字/手写体的识别弱于视觉大模型"><span class="k">本地 OCR（免费 · 免视觉 API）</span><span class="v"><span class="seg" id="segOcr"><button data-v="1"${ocrSel("1")}>开启</button><button data-v="0"${ocrSel("0")}>关闭</button></span></span></div>
-      <div class="kv-row"><span class="k">评论抓取条数</span><span class="v"><span class="seg" id="segComment"><button data-v="10"${ccOn(10)}>10</button><button data-v="20"${ccOn(20)}>20</button><button data-v="50"${ccOn(50)}>50</button></span></span></div>
-      <div class="kv-row"><span class="k">上报令牌</span><span class="v"><code id="tokenCode">${esc(cfg?.capture?.token || "")}</code><button class="link-btn" id="btnCopyToken">复制</button><button class="link-btn" id="btnToken">重置</button></span></div>
+      <div class="kv-row" title="token 默认只显示掩码；点「显示」才向服务端取明文（M7：GET /settings 不再明文返回）"><span class="k">上报令牌</span><span class="v"><code id="tokenCode">${esc(cfg?.capture?.tokenMasked || "")}</code><button class="link-btn" id="btnRevealToken">显示</button><button class="link-btn" id="btnCopyToken">复制</button><button class="link-btn" id="btnToken">重置</button></span></div>
       <div class="kv-row"><span class="k">vault 路径</span><span class="v"><input type="text" id="vaultPathInput" value="${esc(cfg?.vaultPath || "vault")}" style="width:100%;box-sizing:border-box" placeholder="vault"></span></div>
       <div class="kv-row"><span class="k">脚本安装</span><span class="v"><button class="link-btn" id="btnGuide">查看油猴脚本安装指引 →</button></span></div>
     </div>
     <div class="modal-foot"><button class="btn btn-ghost" data-close>取消</button><button class="btn btn-red" id="btnSaveSettings">保存设置</button></div>`;
   $("#overlayModal").hidden = false;
 
-  $$("#segComment button").forEach((b) => b.onclick = () => { $$("#segComment button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); });
   $$("#segOcr button").forEach((b) => b.onclick = () => { $$("#segOcr button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); });
 
   $$("[data-test]").forEach((b) => b.onclick = async () => {
@@ -977,8 +984,23 @@ async function openSettings() {
     }
   });
 
+  let revealedToken = "";
+  $("#btnRevealToken").onclick = async () => {
+    try {
+      const r = await api("/settings/token/reveal", { method: "POST" });
+      revealedToken = r.token || "";
+      $("#tokenCode").textContent = revealedToken;
+      toast("已显示 token，请复制后填入油猴脚本 CONFIG.TOKEN", "ok");
+    } catch (e) { toast(e.message || "读取 token 失败", "err"); }
+  };
   $("#btnCopyToken").onclick = async () => {
-    const token = cfg?.capture?.token || "";
+    if (!revealedToken) {
+      try {
+        const r = await api("/settings/token/reveal", { method: "POST" });
+        revealedToken = r.token || "";
+      } catch (e) { toast(e.message || "读取 token 失败", "err"); return; }
+    }
+    const token = revealedToken;
     if (!token) { toast("无 token 可复制", "err"); return; }
     try {
       await navigator.clipboard.writeText(token);
@@ -1013,7 +1035,6 @@ async function openSettings() {
         text: { baseUrl: val("[data-slot=text-base]"), apiKey: val("[data-slot=text-key]"), model: val("[data-slot=text-model]") },
         vision: { baseUrl: val("[data-slot=vision-base]"), apiKey: val("[data-slot=vision-key]"), model: val("[data-slot=vision-model]") }
       },
-      capture: { commentCount: Number(($$("#segComment button.on")[0]?.dataset.v) || 20) },
       ocr: { enabled: $$("#segOcr button.on")[0]?.dataset.v === "1" },
       vaultPath: ($("#vaultPathInput")?.value ?? "").trim()
     };
@@ -1107,51 +1128,6 @@ async function boot() {
   window.addEventListener("hashchange", route);
 
   $("#btnSettings").onclick = openSettings;
-  /* ── 导出：当前库全部笔记 → 单文件 Markdown 合集（真实下载，每篇独立区块，互不覆盖） ── */
-  const mdComment = (c) => "- 「" + c.text + "」—— 赞 " + c.likes + " @" + (c.author || "匿名") +
-    (c.replies || []).map((r) => "\n  - ↳ " + (r.op ? "**[作者]** " : "") + r.text + " —— 赞 " + r.likes + " @" + (r.author || "匿名")).join("");
-  const noteToMd = (n) => n.type === "synthesis"
-    ? `---\ntitle: ${n.title}\nnote_id: ${n.id}\ntype: synthesis\ntags: [${(n.tags || []).join(", ")}]\nsources: [${(n.sources || []).join(", ")}]\ncollected_at: ${n.collected_at || ""}\n---\n\n## 🧭 主题概述\n${n.overview || ""}\n\n## 🟢 共同要点\n${(n.common || []).map((k) => "- " + k).join("\n")}\n\n## 🟡 分歧与互补\n${(n.diff || []).map((k) => "- " + k).join("\n")}\n\n## ✅ 可执行清单\n${(n.todo || []).map((k) => "- " + k).join("\n")}\n`
-    : `---\ntitle: ${n.title}\nurl: ${n.url || ""}\nnote_id: ${n.id}\nauthor: ${n.author || ""}\ntype: ${n.type}\ncategory: ${n.category || ""}\nsubcategory: ${n.subcategory || ""}\ntags: [${(n.tags || []).join(", ")}]\nliked_count: ${n.liked || 0}\npublished_at: ${n.published_at || ""}\ncollected_at: ${n.collected_at || ""}\n---\n\n## 🧠 AI 摘要\n${n.summary || ""}\n\n## 🔑 关键要点\n${(n.key_points || []).map((k) => "- " + k).join("\n")}\n\n## 📄 原帖正文\n${n.bodyText || "（正文全文以原帖为准；vault 版本中图片以 ![图N](attachments/…) 内联）"}\n\n## 🖼 图片文字识别\n${(n.ocr || []).map((o) => "- " + o).join("\n") || "（无）"}\n\n## 💬 评论精选\n${(n.comments || []).map(mdComment).join("\n") || "（无）"}\n\n## ✏️ 我的备注\n${(n.remark || "").trim() || "（空）"}\n`;
-  /* ── Obsidian 库导出：逐篇 .md 打包 zip（STORE 不压缩，纯手写无依赖） ──
-     同名笔记重复导出 → 文件名相同 → 解压覆盖该篇 = 只更新这一篇；其余文件一律不动。 */
-  const CRC_TABLE = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } return t; })();
-  const crc32 = (s) => { const u = new TextEncoder().encode(s); let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = CRC_TABLE[(c ^ u[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
-  const safeName = (t) => t.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
-  const vaultName = (n) => (n.collected_at ? n.collected_at + " " : "") + safeName(n.title) + ".md";
-  const dosTime = () => { const d = new Date(); return { t: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), d: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate() }; };
-  const buildZip = (entries) => {
-    const enc = new TextEncoder(); const parts = []; const central = []; let offset = 0; const { t: dt, d: dd } = dosTime();
-    for (const e of entries) {
-      const nameB = enc.encode(e.name); const dataB = enc.encode(e.text); const crc = crc32(e.text);
-      const lh = new DataView(new ArrayBuffer(30));
-      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
-      lh.setUint16(8, 0, true); lh.setUint16(10, dt, true); lh.setUint16(12, dd, true);
-      lh.setUint32(14, crc, true); lh.setUint32(18, dataB.length, true); lh.setUint32(22, dataB.length, true);
-      lh.setUint16(26, nameB.length, true); lh.setUint16(28, 0, true);
-      parts.push(new Uint8Array(lh.buffer), nameB, dataB);
-      const ch = new DataView(new ArrayBuffer(46));
-      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
-      ch.setUint16(10, 0, true); ch.setUint16(12, dt, true); ch.setUint16(14, dd, true);
-      ch.setUint32(16, crc, true); ch.setUint32(20, dataB.length, true); ch.setUint32(24, dataB.length, true);
-      ch.setUint16(28, nameB.length, true); ch.setUint32(38, 0, true); ch.setUint32(42, offset, true);
-      central.push(new Uint8Array(ch.buffer), nameB);
-      offset += 30 + nameB.length + dataB.length;
-    }
-    const cdSize = central.reduce((s, p) => s + p.length, 0);
-    const eo = new DataView(new ArrayBuffer(22));
-    eo.setUint32(0, 0x06054b50, true); eo.setUint16(8, entries.length, true); eo.setUint16(10, entries.length, true);
-    eo.setUint32(12, cdSize, true); eo.setUint32(16, offset, true);
-    return new Blob([...parts, ...central, new Uint8Array(eo.buffer)], { type: "application/zip" });
-  };
-  const buildIndexMd = () => {
-    const rows = NOTES.map((n) => {
-      const link = vaultName(n).replace(/\.md$/, "");
-      const tags = (n.tags || []).map((t) => "#" + safeName(t).replace(/\s/g, "")).join(" ");
-      return `- [[${link}|${n.title}]]${tags ? " · " + tags : ""}`;
-    }).join("\n");
-    return `# 薯藏 RedVault · 库目录\n\n> 共 ${NOTES.length} 篇 · 导出于 ${new Date().toLocaleDateString("zh-CN")}\n> 用法：把 redvault 文件夹放入 Obsidian 库（或把 Obsidian 库直接指向它）。重复导出解压时选"覆盖"，只会更新同名笔记，其余文件不动。\n\n## 全部笔记\n${rows}\n`;
-  };
   $("#btnExport").onclick = () => {
     const a = document.createElement("a");
     a.href = "/api/export";

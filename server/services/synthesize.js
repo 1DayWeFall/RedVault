@@ -7,6 +7,7 @@
  */
 
 const { renderSynthMd, safeTitle, readSection } = require('./vault');
+const { httpError } = require('../lib/http-error');
 
 const P4 = (context, theme) => `你是小红书知识库的主题合成助手。以下是${theme ? '关于「' + theme + '」的' : ''}若干篇已整理笔记（每篇含标题/分类/摘要/要点）。请提炼并生成一篇主题综述，要求：
 1) overview：主题概述（≤300 字）
@@ -24,7 +25,7 @@ async function synthesize(ctx, { noteIds, theme }) {
   const index = ctx.store.readIndex().notes;
   const selected = noteIds.map((id) => index.find((n) => n.note_id === id)).filter(Boolean);
   if (selected.length < 2) {
-    throw { status: 400, code: 'NEED_MORE', message: '至少选择 2 篇笔记进行合成' };
+    throw httpError(400, 'NEED_MORE', '至少选择 2 篇笔记进行合成');
   }
 
   /* 上下文组装（§5.8 控 token） */
@@ -64,7 +65,8 @@ async function synthesize(ctx, { noteIds, theme }) {
     common: Array.isArray(result.common) ? result.common.map(String) : [],
     diff: Array.isArray(result.diff) ? result.diff.map(String) : [],
     todo: Array.isArray(result.todo) ? result.todo.map(String) : [],
-    sources: selected.map((n) => `- [[${n.note_id}]]`)
+    /* 来源双链用文件名（Obsidian 可跳转）；note_id 仅存 frontmatter sources 供系统追踪 */
+    sources: selected.map((n) => `- [[${n.file.replace(/\.md$/, '')}]]`)
   });
   const file = ctx.vault.writeNoteFile(safeTitle(title), md);
   ctx.store.upsertIndexNote({

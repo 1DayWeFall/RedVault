@@ -55,7 +55,7 @@ flowchart LR
 |------|------|------|
 | 后端 | Node.js ≥18 + Express 4 | 零构建、生态成熟；仅本机回环监听 |
 | 存储 | 纯文件（Markdown + 侧车 JSON） | 无数据库依赖，vault 可直接被外部工具消费 |
-| 前端 | 原生 HTML/CSS/JS + CDN（Tailwind / lucide / marked） | 无构建链，Node 静态托管即用 |
+| 前端 | 原生 HTML/CSS/JS（无框架、无 CDN 依赖） | 无构建链，Node 静态托管即用；Markdown 由服务端解析，前端只做 `esc()` 转义后渲染 |
 | 采集 | Tampermonkey user.js + `GM_xmlhttpRequest` | 读 `__INITIAL_STATE__` 零风控；GM 请求绕过跨域 |
 | AI | OpenAI 兼容 REST，双模型槽位（文本 + 视觉） | 兼容 GLM/Qwen/GPT 等任意中转，视觉模型兼任 OCR |
 | 图片 | sharp | 压缩 + 缩略图，win32-x64 有预编译；缺失时降级原图 |
@@ -71,26 +71,28 @@ flowchart LR
 20260907154022/
 ├── package.json
 ├── server/
-│   ├── index.js                  # Express 入口：静态托管、路由挂载、统一错误处理
+│   ├── index.js                  # Express 入口：安全中间件、路由挂载、启动自检、统一错误处理
 │   ├── routes/                   # capture / inbox / notes / synthesize / attachments / settings / export
 │   ├── services/                 # ai / pipeline / relate / synthesize / vault / store
-│   └── lib/capture-normalize.js  # 脚本上报 payload 规范化与校验
+│   └── lib/                      # capture-normalize（payload 规范化）· source-link（溯源 token）
+│                                 # http-error（统一 HttpError）· origin-guard（同源校验）· ratelimit（限流）
 ├── public/
-│   ├── index.html                # SPA 外壳
-│   ├── app.js                    # hash 路由、全局状态、API 封装
-│   ├── views/                    # inbox / library / detail / synthesize / settings / progress
-│   └── styles.css                # 自定义样式（Tailwind 经 CDN 引入）
+│   ├── index.html                # SPA 外壳（只引 styles.css + app.js + 字体）
+│   ├── app.js                    # hash 路由、全局状态、API 封装、视图渲染函数
+│   └── styles.css                # 全部自定义样式（无 Tailwind/CDN）
 ├── userscript/
 │   ├── xhs_capture.user.js
 │   └── README.md
 ├── docs/DESIGN.md                # 本文档
-├── vault/                        # 知识库（路径可配置）
+├── F:\work\vault\                # 知识库（vaultPath 可配置为外部绝对路径，当前实例）
 │   └── attachments/
 └── data/                         # 侧车状态
     ├── inbox.json
     ├── config.json
     └── notes_index.json
 ```
+
+> 注：设计早期设想的 `public/views/` 子目录与 Tailwind/lucide/marked CDN 均未落地，实现为单文件 `app.js` + 手写 CSS。
 
 ---
 
@@ -180,10 +182,16 @@ window.__INITIAL_STATE__.noteData.noteDetailMap[noteId].note
     "text":  { "baseUrl": "https://api.example.com/v1", "apiKey": "sk-...", "model": "gpt-4o-mini", "priceIn": 0, "priceOut": 0 },
     "vision":{ "baseUrl": "...", "apiKey": "...", "model": "glm-4v-plus", "priceIn": 0, "priceOut": 0 }
   },
-  "capture": { "commentCount": 20, "token": "随机生成的上报令牌" },
+  "ocr": { "enabled": false, "lang": "chi_sim+eng" },
+  "capture": { "token": "随机生成的上报令牌" },
+  "rag": { "provider": "auto", "allowRemoteEmbed": true, "topK": 6, "chunkSize": 700, "chunkOverlap": 80, "rerank": true },
+  "review": { "recentDays": 14, "randomSize": 3 },
   "vaultPath": "vault"
 }
 ```
+
+读路径全部走 **mtime 感知缓存**（键 = `mtimeMs + size`）：写盘后立即回填缓存，保证「写后立即可见」；
+外部工具（Obsidian）改动文件后靠 mtime 变化自动失效。`commentCount` 随评论抓取下线已移除（M7）。
 
 **`data/notes_index.json`**（内存索引的持久化）：
 
@@ -201,6 +209,8 @@ window.__INITIAL_STATE__.noteData.noteDetailMap[noteId].note
 ```
 
 启动时若 index 与 vault 实际文件不一致，以 vault 扫描重建（frontmatter 为准）。
+实现为 `vault.reconcileIndex({ store, vault })`（M7）：先比对 `.md` **文件名集合**（避免每次启动全量读盘），
+一致则跳过；出现「vault 新增 / index 指向已删除文件 / index 为空而 vault 非空」才全量重建并输出统计日志。
 
 ### 5.4 AI 服务 `services/ai.js`
 
@@ -284,20 +294,23 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 | DELETE | `/inbox/:id` | 删除单条 | → `204` |
 | DELETE | `/inbox` | 一键清空 pending | → `204` |
 | POST | `/inbox/confirm` | 确认处理 `{ids:[...]}` | → `202`，管线后台逐条跑 |
-| GET | `/pipeline/status` | 管线进度 | → `{queue:[{note_id,stage,status,error}], sessionCost}` |
-| GET | `/notes` | 列表/筛选/搜索 | query: `category,subcategory,tag,q,type,sort,published_after,page,pageSize` → 分页卡片数据（不发正文） |
-| GET | `/notes/:id` | 详情 | → frontmatter + 全文 + related/sources 摘要卡 |
-| PATCH | `/notes/:id` | 编辑备注/标签/分类 | `{remark?, tags?, category?, subcategory?}` → 仅改对应区块 |
-| POST | `/notes/:id/reprocess` | `{mode:"reformat"\|"retag"}` | 重排版 / 重新打标（重跑管线对应阶段） |
+| GET | `/pipeline/status` | 管线进度 | → `{queue:[{note_id,stage,status,error}], failed:[最近失败条目], failedTotal, sessionCost, tokens}` |
+| GET | `/notes` | 列表（全量 index 元数据） | → 卡片数组（不发正文）；**筛选/搜索/排序在前端内存完成**，服务端不做分页过滤 |
+| GET | `/notes/:id` | 详情 | → frontmatter + 全文 + 解析好的锚点区块（`sections`） |
+| GET | `/notes/:id/link-status` | 溯源链接活性探测（惰性单篇） | → `{status: alive\|expired\|deleted\|error\|no_token, message, cached}`；带分级 TTL 缓存，`?refresh=1` 绕过 |
+| PATCH | `/notes/:id/section` | 编辑单个锚点区块 | `{key, content}`，key 白名单 `summary/points/body/ocr/comments/related/attachments/remark` → 只替换该区块 |
+| POST | `/notes/:id/reprocess` | 重新打标 | 无 `mode` 参数：重跑 AI 管线并覆盖 AI 区块与分类标签（保留手写内容与评论精选） |
 | DELETE | `/notes/:id` | 删除笔记 | → `204`（含孤立附件清理） |
 | POST | `/synthesize` | 主题合成 | `{noteIds:[≥2], theme?}` → `201 {note_id}`（同步等待生成，前端显示进度） |
 | POST | `/notes/:id/attachments` | 上传附件（multipart） | → `201 {attachment}` |
 | GET | `/notes/:id/attachments` | 附件列表 | → `[{id,name,type,size,merged}]` |
 | POST | `/notes/:id/attachments/:fid/merge` | AI 合并 | → `201` 区块已追加 |
 | DELETE | `/notes/:id/attachments/:fid` | 移除附件及区块 | → `204` |
-| GET | `/settings` | 读配置 | apiKey 脱敏 `sk-***abc` |
-| PUT | `/settings` | 写配置 | 写入前校验路径/格式 |
-| POST | `/settings/test` | `{slot:"text"\|"vision"}` | 发一条最小消息测连通，返回耗时与模型名 |
+| GET | `/settings` | 读配置 | apiKey 脱敏 `sk-***abc`；capture token 只回掩码 `rv_***abcd` |
+| PUT | `/settings` | 写配置 | 掩码/空值视为未修改；写入前校验路径（拒绝 `..` 穿越） |
+| POST | `/settings/test` | `{slot:"text"\|"vision"}` | 发一条最小消息测连通，返回耗时与模型名（限流 10 次/分） |
+| POST | `/settings/token/reveal` | 揭示 capture token | → `{token}`（唯一获取明文的入口） |
+| POST | `/settings/token/rotate` | 轮换 capture token | → `{token}`；旧油猴脚本需重新填写 |
 | GET | `/stats` | 侧栏统计 | → `{inboxCount, noteCount, categoryTree, tagCloud}` |
 | GET | `/export` | 导出 zip | → stream |
 
@@ -416,8 +429,11 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 ## 11. 安全与隐私
 
 - 服务仅绑定 `127.0.0.1`；capture 接口校验 `X-Capture-Token`
-- apiKey 仅存 `data/config.json`（.gitignore），UI 永远脱敏显示；GET /settings 不回明文
-- 上传白名单 + 20MB；Markdown 渲染前过 DOMPurify（CDN）防 XSS
+- **回环同源校验**（M7）：`lib/origin-guard.js` 拦截带跨站 `Origin` 的请求 → `403 FORBIDDEN_ORIGIN`；无 Origin（脚本 XHR / curl）照旧放行
+- **按端点限流**（M7）：`lib/ratelimit.js` 内存滑动窗口——`capture/list` 20/分、`settings/test` 10/分、`reprocess` 5/分、`link-status` 60/分，超限 `429 RATE_LIMITED` 并带 `Retry-After`
+- **移除 `express.urlencoded`**：前端从不使用表单编码，它是跨站表单写入的唯一入口
+- apiKey 仅存 `data/config.json`（.gitignore），UI 永远脱敏显示；**capture token 只回掩码**，需显式 `POST /settings/token/reveal` 才取明文，启动日志亦不再打印
+- 上传白名单 + 20MB；Markdown 由服务端解析，前端一律 `esc()` 转义后渲染（未引入 DOMPurify）
 - 全部数据本地，无任何遥测
 
 ## 12. 错误处理与降级
@@ -436,6 +452,10 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 
 - 瀑布流仅发缩略图路径（thumb.webp 300px），正文按需加载
 - 搜索/分类/relate 评分走内存 index（数千条毫秒级）
+- **侧车 JSON 读缓存**（M7）：以 `mtimeMs + size` 为键，`/notes`、`/stats`、判重、`capture/check` 循环不再每次全量 `readFileSync + JSON.parse`；所有写路径写盘即回填
+- **溯源 token 抽取缓存**（M7）：`lib/source-link.js` 按 md 的 mtime 缓存 `xsec_token`，消除 check 循环的 O(N) 读盘
+- 启动一致性自检走文件名集合快路径，仅在确有差异时才全量扫描 vault
+- `/vault-files` 静态中间件按目录缓存，不再每请求重建
 - zip 流式导出；侧车 JSON 原子写不阻塞
 - 管线并发 1，图片批 6，控制内存峰值
 
@@ -444,9 +464,21 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 - 单测：capture-normalize（各字段缺失容错）、relate 评分、frontmatter 区块定位替换、文件名去重
 - 手测清单：脚本在 explore/discovery 两类详情页触发、评论限速、409 重复、收件箱全流程、无图笔记、视频笔记、6+ 图笔记分批、附件四种类型合并、合成嵌套、导出 zip 用 Obsidian 打开验证、apiKey 脱敏
 
-## 15. 二期路线（预留不实现）
+## 15. 二期路线（M7 已完成，M8–M10 待实现）
 
-Notion API 增量 upsert · 视频转写 · 分类树 AI 归纳重建 · 笔记模板自定义 · 正式 RAG 问答（向量化） · 回顾入口（随机/按周聚合 + AI 要点回顾）
+一期 MVP（M0–M6）交付后，二期按里程碑推进，每个里程碑跑通单测 + API 冒烟 + 浏览器回归后确认再进下一个。
+
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| M7 | 地基与技术债：同源校验 + 限流、启动 index↔vault 一致性、侧车读缓存、HttpError 统一与 fs 错误分类、死代码清理、token 掩码、文档校准 | ✅ 已完成 |
+| M8 | RAG 问答：可插拔嵌入 provider（本地 Ollama → text 槽位 `/embeddings` → 关键词降级）、分块与 md5 增量、向量检索、`#/ask` 问答视图与引用白名单 | 待实现 |
+| M9 | 回顾/回看：ISO 周聚合、随机回顾（避开近期已看）、AI 要点复盘落盘为回顾笔记、`#/review` 视图 | 待实现 |
+| M10 | 看板/画布：领域→分类→子簇→笔记 树状俯瞰、Obsidian JSON Canvas 导出、`#/board` 视图 | 待实现 |
+
+其它候选（暂不排期）：Notion API 增量 upsert · 视频转写 · 分类树 AI 归纳重建 · 笔记模板自定义。
+
+约束：不引入构建链；新增能力一律遵守「原帖不可变」（RAG 只读、回顾写新文件、画布导出为只读产物）；
+远端嵌入必须在 UI 明示「正文将外发」，并可用 `rag.allowRemoteEmbed=false` 关闭。
 
 ## 16. 风险与对策
 

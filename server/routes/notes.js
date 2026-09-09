@@ -9,6 +9,7 @@ const { readSection } = require('../services/vault');
 const { runAi } = require('../services/pipeline');
 const { probeSource } = require('../services/fetch-note');
 const { vaultTokenOf } = require('../lib/source-link');
+const { httpError, toHttpError } = require('../lib/http-error');
 
 /** 溯源链接探测缓存（模块级单例）：键 = noteId:token——重扫换 token 即换键自动重探；
  *  TTL 按状态分级：alive 10min / expired·deleted 1h（不自愈）/ error 30s（允许重试）；
@@ -76,11 +77,11 @@ module.exports = function notesRoutes(ctx) {
   router.get('/notes/:id', (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const { fm, content } = ctx.vault.readNoteFile(meta.file);
       res.json({ note: meta, fm, content, sections: parseSections(content) });
     } catch (e) {
-      next(e.code ? e : { status: 500, message: e.message });
+      next(toHttpError(e)); // 文件系统错误（ENOENT/EACCES…）分类为 400，不再一律 500
     }
   });
 
@@ -90,7 +91,7 @@ module.exports = function notesRoutes(ctx) {
   router.get('/notes/:id/link-status', async (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const noteId = req.params.id;
 
       const stored = vaultTokenOf(ctx, noteId);
@@ -124,7 +125,7 @@ module.exports = function notesRoutes(ctx) {
       }
       const entry = await p;
       res.json({ note_id: noteId, ...entry });
-    } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   /* 区块编辑（锚点替换，只动目标区块 §5.6） */
@@ -132,14 +133,14 @@ module.exports = function notesRoutes(ctx) {
     try {
       const { key, content } = req.body || {};
       if (!EDITABLE_SECTIONS.has(key)) {
-        throw { status: 400, code: 'BAD_SECTION', message: `不可编辑的区块: ${key}` };
+        throw httpError(400, 'BAD_SECTION', `不可编辑的区块: ${key}`);
       }
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       ctx.vault.updateNoteFile(meta.file, {}, { [key]: String(content ?? '') });
       ctx.store.upsertIndexNote({ note_id: meta.note_id, modified_at: new Date().toISOString() });
       res.json({ ok: true });
-    } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   /* 重新打标：读 vault 原文 → 复用管线 runAi（含 vision→text 回退）重跑 →
@@ -147,10 +148,10 @@ module.exports = function notesRoutes(ctx) {
   router.post('/notes/:id/reprocess', async (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const cfg = ctx.store.readConfig();
       if (!cfg.ai?.text?.apiKey && !cfg.ai?.vision?.apiKey) {
-        throw { status: 400, code: 'NO_AI_CONFIG', message: '尚未配置 AI，请先在设置页填写 text 或 vision 槽位' };
+        throw httpError(400, 'NO_AI_CONFIG', '尚未配置 AI，请先在设置页填写 text 或 vision 槽位');
       }
 
       const { fm, content } = ctx.vault.readNoteFile(meta.file);
@@ -177,7 +178,7 @@ module.exports = function notesRoutes(ctx) {
       try {
         ai = await runAi(ctx, raw, { local, remote: [], thumb: fm.cover || '' });
       } catch (e) {
-        throw e.code ? e : { status: 502, code: 'AI_REPROCESS_FAILED', message: 'AI 处理失败：' + (e.message || e) };
+        throw toHttpError(e, { status: 502, code: 'AI_REPROCESS_FAILED' });
       }
 
       /* 区块更新：summary/points 覆盖；ocr 有内容才写；comments 保留评论精选、仅刷新 AI 洞察段 */
@@ -201,19 +202,19 @@ module.exports = function notesRoutes(ctx) {
       });
       console.log(`[notes] reprocess ${meta.note_id} 《${meta.title}》 → ${ai.category}/${ai.subcategory || '-'} tags=[${ai.tags.join(',')}]`);
       res.json({ ok: true, note: ctx.store.readIndex().notes.find((n) => n.note_id === meta.note_id) });
-    } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   /* 删除：vault 文件 + 附件前缀清理 + index 移除 */
   router.delete('/notes/:id', (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const cleaned = ctx.vault.deleteNoteFile(meta.file, meta.note_id);
       ctx.store.removeIndexNote(meta.note_id);
       console.log(`[notes] 删除 ${meta.note_id} 《${meta.title}》（附件清理 ${cleaned} 个）`);
       res.status(204).end();
-    } catch (e) { next(e.code ? e : { status: 500, message: e.message }); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   return router;

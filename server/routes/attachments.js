@@ -10,6 +10,7 @@ const path = require('path');
 const express = require('express');
 const multer = require('multer');
 const { readSection } = require('../services/vault');
+const { httpError, toHttpError } = require('../lib/http-error');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -77,11 +78,11 @@ module.exports = function attachmentsRoutes(ctx) {
   router.post('/notes/:id/attachments', upload.single('file'), (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const file = req.file;
-      if (!file) throw { status: 400, code: 'NO_FILE', message: '缺少文件' };
+      if (!file) throw httpError(400, 'NO_FILE', '缺少文件');
       const ext = path.extname(file.originalname).toLowerCase();
-      if (!ALLOWED_EXT.has(ext)) throw { status: 400, code: 'BAD_TYPE', message: '仅支持 md/txt/jpg/png/webp/pdf' };
+      if (!ALLOWED_EXT.has(ext)) throw httpError(400, 'BAD_TYPE', '仅支持 md/txt/jpg/png/webp/pdf');
 
       const fid = 'att' + Date.now();
       const name = `${meta.note_id}-${fid}-${safePart(file.originalname)}`;
@@ -94,28 +95,28 @@ module.exports = function attachmentsRoutes(ctx) {
       ctx.vault.updateNoteFile(meta.file, { attachments: atts }, {});
       ctx.store.upsertIndexNote({ note_id: meta.note_id, has_attachment: true });
       res.status(201).json({ attachment: att });
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   /* 列表 */
   router.get('/notes/:id/attachments', (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const { fm } = ctx.vault.readNoteFile(meta.file);
       res.json(Array.isArray(fm.attachments) ? fm.attachments : []);
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   /* AI 合并 */
   router.post('/notes/:id/attachments/:fid/merge', async (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const { fm, content } = ctx.vault.readNoteFile(meta.file);
       const atts = Array.isArray(fm.attachments) ? fm.attachments : [];
       const att = atts.find((a) => a.id === req.params.fid);
-      if (!att) throw { status: 404, code: 'ATT_NOT_FOUND', message: '附件不存在' };
+      if (!att) throw httpError(404, 'ATT_NOT_FOUND', '附件不存在');
 
       const abs = path.join(ctx.vault.attachDir, att.file);
       const attText = await extractText(ctx, abs, att.ext);
@@ -134,24 +135,28 @@ module.exports = function attachmentsRoutes(ctx) {
       const nextAtts = atts.map((a) => (a.id === att.id ? { ...a, merged: true } : a));
       ctx.vault.updateNoteFile(meta.file, { attachments: nextAtts }, {});
       res.json({ ok: true });
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   /* 移除 */
   router.delete('/notes/:id/attachments/:fid', (req, res, next) => {
     try {
       const meta = ctx.store.readIndex().notes.find((n) => n.note_id === req.params.id);
-      if (!meta) throw { status: 404, code: 'NOT_FOUND', message: '笔记不存在' };
+      if (!meta) throw httpError(404, 'NOT_FOUND', '笔记不存在');
       const { fm } = ctx.vault.readNoteFile(meta.file);
       const atts = Array.isArray(fm.attachments) ? fm.attachments : [];
       const att = atts.find((a) => a.id === req.params.fid);
-      if (!att) throw { status: 404, code: 'ATT_NOT_FOUND', message: '附件不存在' };
-      try { fs.unlinkSync(path.join(ctx.vault.attachDir, att.file)); } catch (_) {}
+      if (!att) throw httpError(404, 'ATT_NOT_FOUND', '附件不存在');
+      try {
+        fs.unlinkSync(path.join(ctx.vault.attachDir, att.file));
+      } catch (e) {
+        console.warn(`[attachments] 附件文件删除失败（${att.file}）: ${e.message}`);
+      }
       const nextAtts = atts.filter((a) => a.id !== att.id);
       ctx.vault.updateNoteFile(meta.file, { attachments: nextAtts }, {});
       ctx.store.upsertIndexNote({ note_id: meta.note_id, has_attachment: nextAtts.length > 0 });
       res.status(204).end();
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); } // fs 错误分类为 400，不再一律 500
   });
 
   return router;

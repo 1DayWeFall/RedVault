@@ -6,12 +6,9 @@
    ```powershell
    npm start
    ```
-   启动日志会打印一行：
-   ```
-   [RedVault] 油猴脚本上报 token: rv_xxxxxxxxxxxxxxxxxxxxxxxx
-   ```
+   Web 端「⚙ 设置 → 上报令牌」点 **显示** 即可查看并复制（M7 起启动日志不再打印 token）。
 
-2. **安装脚本**：浏览器装 [Tampermonkey](https://www.tampermonkey.net/) 扩展 → 新建脚本 → 把 `xhs_capture.user.js` 全文粘贴进去 → 保存。再把脚本顶部 `CONFIG.TOKEN` 填成上一步日志里的 token。
+2. **安装脚本**：浏览器装 [Tampermonkey](https://www.tampermonkey.net/) 扩展 → 新建脚本 → 把 `xhs_capture.user.js` 全文粘贴进去 → 保存。再把脚本顶部 `CONFIG.TOKEN` 填成上一步复制的 token。
 
 3. **正常刷小红书**：进入任意笔记详情页，右下角出现红色描边的「薯藏 RedVault」面板，自动完成：提取主数据 → 抓评论（3–5s 限速翻页）→ 上报收件箱。显示 `已上报 ✓` 即成功。
 
@@ -33,7 +30,7 @@
 
 | 现象 | 处理 |
 |---|---|
-| 「未配置 TOKEN」 | 编辑脚本填 `CONFIG.TOKEN`（服务启动日志里有） |
+| 「未配置 TOKEN」 | 编辑脚本填 `CONFIG.TOKEN`（设置页 → 上报令牌 → 显示） |
 | 「服务未启动？」 | 本机先 `npm start`，脚本会自动重试 3 次，或点「重新抓取」 |
 | 「未找到页面数据」 | 页面未加载完或版本差异，等 1 秒点「重新抓取」 |
 | 评论数量少于目标 | 评论接口触发风控被主动放弃（设计如此），笔记主数据不受影响 |

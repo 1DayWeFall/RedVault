@@ -34,6 +34,43 @@ function readJsonSafe(file, fallbackFactory) {
   }
 }
 
+/**
+ * 读缓存（M7）：以 mtimeMs + size 为键，避免每个请求都全量 readFileSync + JSON.parse
+ * （/notes、/stats、isDuplicate、capture/check 循环等曾为 O(N) 全量解析）
+ * 约定：所有写路径写盘后立即 prime（写后立即可见），外部改动靠 mtime/size 变化自动失效
+ */
+function createReadCache() {
+  const cache = new Map(); // file → { mtimeMs, size, value }
+  return {
+    read(file, fallbackFactory) {
+      let st;
+      try {
+        st = fs.statSync(file);
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        cache.delete(file);
+        return fallbackFactory();
+      }
+      const hit = cache.get(file);
+      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.value;
+      const value = readJsonSafe(file, fallbackFactory);
+      cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, value });
+      return value;
+    },
+    prime(file, value) {
+      try {
+        const st = fs.statSync(file);
+        cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, value });
+      } catch (_) {
+        cache.delete(file);
+      }
+    },
+    invalidate(file) { cache.delete(file); },
+    clear() { cache.clear(); },
+    get size() { return cache.size; }
+  };
+}
+
 function defaultConfig() {
   return {
     ai: {
@@ -41,7 +78,15 @@ function defaultConfig() {
       vision: { baseUrl: '', apiKey: '', model: '', priceIn: 0, priceOut: 0 }
     },
     ocr: { enabled: false, lang: 'chi_sim+eng' },  // 本地 OCR（Tesseract）：免 API 费，vision 未配时接管图片文字提取
-    capture: { commentCount: 20, token: 'rv_' + crypto.randomBytes(12).toString('hex') },
+    // 无 commentCount：评论抓取随脚本 v0.4 下线，该设置项后端无人消费（M7 清理）
+    capture: { token: 'rv_' + crypto.randomBytes(12).toString('hex') },
+    // 二期预留：rag（M8）/ review（M9），缺字段按此补齐，旧配置不受影响
+    rag: {
+      provider: 'auto',          // auto → 本地优先，不可用回落远端嵌入，再降级关键词
+      allowRemoteEmbed: true,    // 关掉则禁止任何正文外发（含远端 /embeddings）
+      topK: 6, chunkSize: 700, chunkOverlap: 80, rerank: true
+    },
+    review: { recentDays: 14, randomSize: 3 },
     vaultPath: 'vault'
   };
 }
@@ -56,20 +101,35 @@ function createStore(dataDir) {
     config: path.join(dataDir, 'config.json'),
     index: path.join(dataDir, 'notes_index.json')
   };
+  const cache = createReadCache();
+
+  /* 写穿：落盘失败必须让缓存失效，否则缓存里会留下未落盘的数据（判重等读路径出现假阳性） */
+  const writeThrough = (file, value) => {
+    try {
+      atomicWriteJson(file, value);
+      cache.prime(file, value);
+    } catch (e) {
+      cache.invalidate(file);
+      throw e;
+    }
+  };
 
   /* 首次运行写入默认 config（保证 capture token 稳定存在） */
   if (!fs.existsSync(paths.config)) atomicWriteJson(paths.config, defaultConfig());
 
   return {
     paths,
+    /* 测试与运维用：缓存条目数 / 手动失效 */
+    cacheSize: () => cache.size,
+    invalidateCache: () => cache.clear(),
 
     /* ── inbox ── */
-    readInbox: () => readJsonSafe(paths.inbox, defaultInbox),
-    saveInbox: (items) => atomicWriteJson(paths.inbox, items),
+    readInbox: () => cache.read(paths.inbox, defaultInbox),
+    saveInbox: (items) => writeThrough(paths.inbox, items),
 
     /* ── config ── */
     readConfig: () => {
-      const cfg = readJsonSafe(paths.config, defaultConfig);
+      const cfg = cache.read(paths.config, defaultConfig);
       // 结构演进兜底：缺字段补默认
       const dft = defaultConfig();
       cfg.ai = cfg.ai || dft.ai;
@@ -77,15 +137,17 @@ function createStore(dataDir) {
       cfg.ai.vision = { ...dft.ai.vision, ...cfg.ai.vision };
       cfg.ocr = { ...dft.ocr, ...cfg.ocr };
       cfg.capture = { ...dft.capture, ...cfg.capture };
+      cfg.rag = { ...dft.rag, ...cfg.rag };
+      cfg.review = { ...dft.review, ...cfg.review };
       if (!cfg.capture.token) cfg.capture.token = dft.capture.token;
       if (!cfg.vaultPath) cfg.vaultPath = dft.vaultPath;
       return cfg;
     },
-    saveConfig: (cfg) => atomicWriteJson(paths.config, cfg),
+    saveConfig: (cfg) => writeThrough(paths.config, cfg),
 
     /* ── notes index ── */
-    readIndex: () => readJsonSafe(paths.index, defaultIndex),
-    saveIndex: (idx) => atomicWriteJson(paths.index, idx),
+    readIndex: () => cache.read(paths.index, defaultIndex),
+    saveIndex: (idx) => writeThrough(paths.index, idx),
 
     /* 收件箱 + 索引双重判重（§5.1 去重） */
     isDuplicate(noteId) {

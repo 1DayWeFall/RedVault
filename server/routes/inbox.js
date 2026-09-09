@@ -3,6 +3,7 @@
 /** 收件箱路由（DESIGN §6）：列表裁剪 / 预览 / 删除 / 清空 / 确认处理 / 管线进度 */
 
 const express = require('express');
+const { httpError, toHttpError } = require('../lib/http-error');
 
 module.exports = function inboxRoutes(ctx) {
   const router = express.Router();
@@ -19,18 +20,18 @@ module.exports = function inboxRoutes(ctx) {
   router.get('/inbox/:id', (req, res, next) => {
     try {
       const entry = ctx.store.readInbox().find((x) => x.note_id === req.params.id);
-      if (!entry) throw { status: 404, code: 'NOT_FOUND', message: '收件箱无此条目' };
+      if (!entry) throw httpError(404, 'NOT_FOUND', '收件箱无此条目');
       res.json(entry);
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); }
   });
 
   router.delete('/inbox/:id', (req, res, next) => {
     try {
       if (!ctx.store.removeInboxEntry(req.params.id)) {
-        throw { status: 404, code: 'NOT_FOUND', message: '收件箱无此条目' };
+        throw httpError(404, 'NOT_FOUND', '收件箱无此条目');
       }
       res.status(204).end();
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); }
   });
 
   /* 批量清空/删除：
@@ -55,11 +56,11 @@ module.exports = function inboxRoutes(ctx) {
     try {
       const ids = req.body?.ids;
       if (!Array.isArray(ids) || ids.length === 0 || ids.some((i) => typeof i !== 'string')) {
-        throw { status: 400, code: 'BAD_IDS', message: 'ids 须为非空字符串数组' };
+        throw httpError(400, 'BAD_IDS', 'ids 须为非空字符串数组');
       }
       ctx.pipeline.confirm(ids);
       res.status(202).json({ accepted: ids.length });
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); }
   });
 
   router.get('/pipeline/status', (req, res) => {

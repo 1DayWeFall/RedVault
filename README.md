@@ -27,22 +27,24 @@
 | AI 双槽位管线 + 图片压缩 + 设置页 | ✅ M4（vision/text 双槽位、sharp 缩略图、relate 互链、设置页测试连接） |
 | 主题合成 / 附件 AI 合并 / 服务端导出 | ✅ M5（P4 合成、multer+pdf-parse 附件、archiver 流式 zip） |
 | 安全打磨 + 验收 | ✅ M6（XSS 转义、脱敏复查、冒烟回归、Obsidian 导出实测） |
+| 二期 M7 地基与技术债 | ✅（同源校验 + 限流、启动 index↔vault 一致性、侧车读缓存、HttpError 统一、死代码清理、token 掩码、文档校准；88 项单测全绿） |
 
 ## 仓库结构
 
 ```
 RedVault/
 ├── server/                 # Node 服务（Express · 127.0.0.1:3789 · 仅回环监听）
-│   ├── index.js            # 入口：静态托管 / 统一错误处理 / 启动自检
-│   ├── routes/             # API 路由（capture / inbox / notes / …随里程碑挂载）
-│   ├── services/           # 数据层 / vault 引擎 / AI 管线 / …
-│   └── lib/                # capture 数据规范化等纯函数
-├── public/                 # 前端（由 demo 平移，无构建链）
+│   ├── index.js            # 入口：安全中间件（同源校验/限流）/ 启动自检 / 统一错误处理
+│   ├── routes/             # API 路由（capture / inbox / notes / settings / attachments / synthesize / export）
+│   ├── services/           # 数据层 / vault 引擎 / AI 管线 / 关联评分 / 主题合成
+│   └── lib/                # capture 规范化、溯源 token、http-error / origin-guard / ratelimit
+├── public/                 # 前端（无构建链：原生 HTML/CSS/JS，无 CDN 依赖）
 ├── userscript/             # 油猴采集脚本 xhs_capture.user.js
 ├── tests/                  # node:test 单测
 ├── docs/DESIGN.md          # 设计文档（唯一事实源）
-├── vault/  data/           # 运行时数据（.gitignore，绝不入库）
-├── start.ps1               # 一键启动：清理旧进程 → 启动服务 → 探测健康 → 提示入口
+├── data/                   # 运行时侧车数据（.gitignore，绝不入库）
+├── F:\work\vault\          # 知识库（vaultPath 可配置，当前实例指向此处）
+├── start.cmd               # 一键启动：清理旧进程 → 启动服务 → 探测健康 → 打开入口
 ├── sync.ps1                # 一键同步：git add → commit → push
 └── README.md               # 本文件
 ```
@@ -52,7 +54,7 @@ RedVault/
 **唯一入口 `http://127.0.0.1:3789`**（端口固定）。推荐一键启动：
 
 ```powershell
-.\start.ps1      # 自动清理残留进程并启动服务，提示唯一入口地址
+.\start.cmd      # 自动清理残留进程并启动服务，提示唯一入口地址
 ```
 
 等价方式（手动）：
@@ -67,7 +69,7 @@ npm start        # → http://127.0.0.1:3789
 数据来自真实采集，当前为**空库起步**（抓取一条进收件箱 → 确认 → 落盘一条）：
 
 - **采集**：装油猴脚本（`userscript/xhs_capture.user.js`）→ 刷小红书详情页自动上报收件箱
-- **收件箱**：预览 / 勾选 / 批量确认（当前无 AI，确认后直接落盘，分类「未整理」）
+- **收件箱**：预览 / 勾选 / 批量确认（AI 管线后台串行整理后落盘；未配 AI 时降级直落盘，分类「未整理」）
 - **笔记库**：瀑布流、两级分类树、标签云、搜索、排序、多选
 - **详情**：AI 摘要与原帖正文分区渲染、楼中楼评论、备注行内编辑（实时回写 vault）
 - **导出**：Obsidian 格式 zip（逐篇 `.md` + frontmatter + `[[wikilink]]` 索引；重复导出解压覆盖 = 仅更新同名单篇）
@@ -100,14 +102,18 @@ npm start        # → http://127.0.0.1:3789
 | 2026-09-07 | **M5** 主题合成 + 附件 AI 合并 + 服务端 zip 导出：P4 合成、multer/pdf-parse 附件、archiver 流式导出；导出/附件增删/无 AI 降级 9 项全过 |
 | 2026-09-07 | **M6** 安全打磨 + 验收：XSS 转义补漏、导出加 INDEX wikilink、脱敏复查；playwright 冒烟 5 项全过 + console 零错误 + zip 解压验证 Obsidian 兼容。**MVP 交付完成** |
 | 2026-09-07 | 迭代：**视频字幕采集**（借鉴 xhs-vault，取平台 SRT 字幕纳入 AI 整理，不再「视频未转写」）+ 修复**复制脚本**（弹窗展示/复制/下载）+ 修复 **vault 路径自定义**（热切换+迁移）；21 单测 + API 9 项 + 浏览器回归 8 项全过 |
+| 2026-09-10 | **二期 M7 地基与技术债**：回环同源校验（`lib/origin-guard`）+ 按端点限流（`lib/ratelimit`，capture/list·settings/test·reprocess·link-status）、启动 index↔vault 一致性自检（`vault.reconcileIndex`）、侧车 JSON 与溯源 token 读缓存（mtime 感知）、`lib/http-error` 统一 HttpError 并把 fs 错误从 500 改判 400、管线失败项进 `/pipeline/status`、静默 catch 改告警、清理死代码（前端手写 zip 打包/失效的评论条数设置/STAGES/stripHtml 别名）、capture token 掩码 + `reveal/rotate` 端点、版本统一 0.3.0、README 与 DESIGN 校准；新增 3 组单测（安全/缓存/一致性），**88 项单测全绿** |
 
 ## 后续路线
 
-| 优先级 | 方向 | 说明 |
+| 里程碑 | 方向 | 说明 |
 |------|------|------|
-| 待排期 | 看板/画布视图 | 领域→分类→子簇→笔记 的树状俯瞰，可输出 Obsidian `.canvas`（借鉴 xhs-vault） |
-| 待排期 | 回看视图 | 渲染手写复盘，让「收藏反刍」被主动展示（契合「收藏不是终点，是起点」） |
-| 二期 | RAG 问答 / 回顾聚合 | 见 DESIGN.md §15 二期路线 |
+| M7 | 地基与技术债 | ✅ 已完成：同源校验 + 按端点限流、启动 index↔vault 一致性重建、侧车 JSON 与溯源 token 读缓存、HttpError 统一与 fs 错误分类、死代码清理、capture token 掩码、README/DESIGN 校准 |
+| M8 | RAG 问答 | 可插拔嵌入 provider（本地 Ollama → text 槽位 `/embeddings` → 关键词降级）+ 增量向量索引 + `#/ask` 问答视图（引用白名单，杜绝幻觉引用） |
+| M9 | 回顾 / 回看视图 | ISO 周聚合 + 随机回顾（避开近期已看）+ AI 要点复盘，可落盘为 vault 内的「回顾」笔记 |
+| M10 | 看板 / 画布视图 | 领域→分类→子簇→笔记 树状俯瞰，可导出 Obsidian `.canvas` |
+
+> 每个里程碑跑通 `npm test` + API 冒烟 + 浏览器回归后再进入下一个；详见 `docs/DESIGN.md` §15。
 
 ## 同步本仓库
 

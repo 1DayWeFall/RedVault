@@ -7,6 +7,7 @@
 
 const express = require('express');
 const archiver = require('archiver');
+const { toHttpError } = require('../lib/http-error');
 
 module.exports = function exportRoutes(ctx) {
   const router = express.Router();
@@ -14,7 +15,7 @@ module.exports = function exportRoutes(ctx) {
   router.get('/export', (req, res, next) => {
     try {
       const archive = archiver('zip', { zlib: { level: 9 } });
-      archive.on('error', (e) => next(e));
+      archive.on('error', (e) => next(toHttpError(e)));
       archive.on('warning', (w) => { if (w.code !== 'ENOENT') console.warn('[export]', w.message); });
 
       const date = new Date().toISOString().slice(0, 10);
@@ -28,7 +29,7 @@ module.exports = function exportRoutes(ctx) {
 
       archive.directory(ctx.vault.dir, false); // vault 根内容（含 attachments/）原样打包
       archive.finalize();
-    } catch (e) { next(e); }
+    } catch (e) { next(toHttpError(e)); }
   });
 
   return router;
