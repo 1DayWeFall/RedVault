@@ -23,11 +23,24 @@ async function api(path, opts = {}) {
   const init = { headers: {} };
   if (opts.method) init.method = opts.method;
   if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
-  const r = await fetch("/api" + path, init);
+  let r;
+  try { r = await fetch("/api" + path, init); }
+  catch { throw new Error("无法连接本地服务，请双击桌面 RedVault 图标启动后刷新重试"); }
   if (r.status === 204) return null;
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j.error && j.error.message) || ("请求失败 " + r.status));
   return j;
+}
+
+/* file:// 误开防呆：直接双击 html 文件时 /api 请求必然失败，给出明确指引并终止脚本 */
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", () => {
+    document.body.insertAdjacentHTML("afterbegin",
+      '<div style="position:sticky;top:0;z-index:9999;background:#fff3cd;color:#856404;border-bottom:1px solid #ffeeba;padding:10px 16px;font-size:14px;">' +
+      '当前是直接打开本地文件，页面无法加载数据。请双击桌面 <b>RedVault</b> 图标，或访问 ' +
+      '<a href="http://127.0.0.1:3789">http://127.0.0.1:3789</a></div>');
+  });
+  throw new Error("file:// protocol is not supported; open http://127.0.0.1:3789 instead");
 }
 
 /* 瀑布流高度：按 note_id 稳定伪随机，刷新不跳动 */
