@@ -184,7 +184,7 @@ window.__INITIAL_STATE__.noteData.noteDetailMap[noteId].note
   },
   "ocr": { "enabled": false, "lang": "chi_sim+eng" },
   "capture": { "token": "随机生成的上报令牌" },
-  "rag": { "provider": "auto", "allowRemoteEmbed": true, "topK": 6, "chunkSize": 700, "chunkOverlap": 80, "rerank": true },
+  "rag": { "provider": "auto", "allowRemoteEmbed": false, "topK": 6, "chunkSize": 700, "chunkOverlap": 80, "rerank": true, "indexVersion": 1 },
   "review": { "recentDays": 14, "randomSize": 3 },
   "vaultPath": "vault"
 }
@@ -478,7 +478,7 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 其它候选（暂不排期）：Notion API 增量 upsert · 视频转写 · 分类树 AI 归纳重建 · 笔记模板自定义。
 
 约束：不引入构建链；新增能力一律遵守「原帖不可变」（RAG 只读、回顾写新文件、画布导出为只读产物）；
-远端嵌入必须在 UI 明示「正文将外发」，并可用 `rag.allowRemoteEmbed=false` 关闭。
+远端嵌入仅在 `rag.allowRemoteEmbed=true` 显式开启时可用（**默认 false**，本地优先），开启后必须在 UI 持续明示「正文将外发」。
 
 ## 16. 风险与对策
 
