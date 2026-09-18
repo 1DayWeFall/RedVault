@@ -39,14 +39,15 @@ async function withFetch(mock, fn) {
 
 /* ── fetchNoteDetail 分类 ── */
 
-test('fetchNoteDetail：302 登录页 → token_expired', async () => {
+test('fetchNoteDetail：302 登录页 → login_wall（2026-09-18 平台对未登录会话上登录墙，不再误诊为 token 过期）', async () => {
   const r = await withFetch(
     () => resp('<html>login</html>', { url: 'https://www.xiaohongshu.com/login?source=explore' }),
     () => fetchNoteDetail('n1', 'X')
   );
   assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.reason, 'token_expired');
-  assert.ok(r.message.includes('重扫'));
+  assert.strictEqual(r.reason, 'login_wall');
+  assert.ok(r.message.includes('登录墙'));
+  assert.ok(r.message.includes('0.5.0'));
 });
 
 test('fetchNoteDetail：HTTP 403 → risk', async () => {
@@ -139,7 +140,7 @@ test('capture/list：failed 条目豁免判重，重采成功转回 pending', as
   assert.strictEqual(ctx.store.readInbox().length, 1); // 覆盖而非追加
 });
 
-test('capture/list：重采仍失败（token 过期）覆盖刷新原因，不重试不新增', async (t) => {
+test('capture/list：重采仍失败（登录墙）覆盖刷新原因，不重试不新增', async (t) => {
   const ctx = setup([failedEntry('n1')]);
   t.after(cleanup(ctx));
   const j = await withFetch(
@@ -147,12 +148,12 @@ test('capture/list：重采仍失败（token 过期）覆盖刷新原因，不�
     async () => (await post(ctx.base, [{ note_id: 'n1', xsec_token: 'X' }])).json()
   );
   assert.strictEqual(j.results[0].status, 'failed');
-  assert.strictEqual(j.results[0].reason, 'token_expired');
+  assert.strictEqual(j.results[0].reason, 'login_wall');
   const items = ctx.store.readInbox();
   assert.strictEqual(items.length, 1);
   assert.strictEqual(items[0].status, 'failed');
-  assert.strictEqual(items[0].process.reason, 'token_expired');
-  assert.ok(items[0].process.error.includes('xsec_token 已过期'));
+  assert.strictEqual(items[0].process.reason, 'login_wall');
+  assert.ok(items[0].process.error.includes('登录墙'));
 });
 
 test('capture/list：pending 条目再上报仍判重（防重复处理回归）', async (t) => {

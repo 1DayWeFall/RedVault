@@ -114,6 +114,7 @@ module.exports = function notesRoutes(ctx) {
           const r = await probeSource(noteId, stored.token);
           const status = r.ok ? 'alive'
             : r.reason === 'token_expired' ? 'expired'
+            : r.reason === 'login_wall' ? 'login_wall'
             : r.reason === 'incomplete' ? 'deleted'
             : 'error';
           const entry = { status, message: r.ok ? '链接有效，可直接打开' : r.message, at: Date.now() };

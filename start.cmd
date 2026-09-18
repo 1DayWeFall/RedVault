@@ -14,8 +14,9 @@ REM ---- locate node ----
 set "NODE="
 where node >nul 2>&1 && set "NODE=node"
 if not defined NODE (
-  if exist "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-2\node.exe" (
-    set "NODE=%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-2\node.exe"
+  REM workbuddy 版本号会变（22.22.2-2 → 22.22.2-3），遍历 versions 取最新，不写死
+  for /d %%d in ("%USERPROFILE%\.workbuddy\binaries\node\versions\*") do (
+    if exist "%%d\node.exe" set "NODE=%%d\node.exe"
   )
 )
 if not defined NODE (

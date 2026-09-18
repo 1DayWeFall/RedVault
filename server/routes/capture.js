@@ -7,17 +7,21 @@
  *                           （新增 + 收件箱 failed 重采候选），已入库/已入箱的跳过；
  *                           新格式 {items:[{note_id,xsec_token}]} 额外返回 stale：
  *                           已入库但清单 token 较新（溯源链接过期）需重报刷新
- * - POST /api/capture/list  收藏夹清单批量上报：油猴脚本只发清单（note_id + xsec_token），
- *                           服务端逐条用 xsec_token 抓详情页（限速 1.5~3s 随机抖动），
- *                           解析 __INITIAL_STATE__ 取正文/字幕/图片后判重入箱。
- *                           收件箱 failed 条目豁免判重：重扫带新 token 自动重采覆盖；
+ * - POST /api/capture/list  收藏夹清单批量上报（三段式，ADR-006）：
+ *                           ① 油猴 hook 列表吸收清单；② 油猴 0.5.0+ 在浏览器登录态内
+ *                           抓 explore 详情（__INITIAL_STATE__.note + 字幕 SRT 原文）
+ *                           随清单一并上报；③ 服务端只收数据入箱，不对外抓取。
+ *                           条目带 note → 直接入箱；带 fetch_error → failed(browser_fetch)
+ *                           留待重扫重试；两者皆无（老脚本 <0.5.0）→ 兼容走服务端直抓
+ *                           （限速 1.5~3s 随机抖动；登录墙后此路径基本必败，仅作过渡）。
+ *                           收件箱 failed 条目豁免判重：重扫带新数据自动重采覆盖；
  *                           瞬时类失败（网络/风控/HTTP）自动补抓一次。
  * 鉴权 X-Capture-Token。
  */
 
 const express = require('express');
 const { normalizeCapture, toInt } = require('../lib/capture-normalize');
-const { fetchNoteDetail, exploreUrl, sleep } = require('../services/fetch-note');
+const { fetchNoteDetail, exploreUrl, parseSrt, sleep } = require('../services/fetch-note');
 const { vaultTokenOf } = require('../lib/source-link');
 const { httpError, toHttpError } = require('../lib/http-error');
 
@@ -138,7 +142,63 @@ module.exports = function captureRoutes(ctx) {
           continue;
         }
 
-        /* 限速：串行 + 随机抖动，规避风控（§5.1） */
+        /* ── 新脚本（0.5.0+）：浏览器内已抓详情，服务端零外网请求 ── */
+        if (item.note && typeof item.note === 'object') {
+          try {
+            /* 字幕：油猴上报 SRT 原文（字幕 URL 带签名会过期，须在浏览器内即时下载），
+               服务端负责清洗（去序号/时间戳） */
+            const s = item.subtitle;
+            const subtitle = (s && typeof s === 'object')
+              ? { text: parseSrt(String(s.text ?? s.srt ?? '')), lang: String(s.lang || '') }
+              : null;
+            const { raw } = normalizeCapture({
+              note_id: noteId,
+              source_url: exploreUrl(noteId, xsec),
+              xsec_token: xsec,
+              note: item.note,
+              subtitle,
+              comments: []
+            });
+            ctx.store.upsertInboxEntry({
+              note_id: noteId,
+              captured_at: new Date().toISOString(),
+              status: 'pending',
+              raw,
+              process: null
+            });
+            console.log(`[capture/list] 入收件箱（浏览器详情${refeed ? '，failed 重采修复' : ''}）: ${noteId} 《${raw.title}》`);
+            results.push({ note_id: noteId, status: 'inbox', refeed: refeed || undefined });
+          } catch (e) {
+            ctx.store.upsertInboxEntry({
+              note_id: noteId,
+              captured_at: new Date().toISOString(),
+              status: 'failed',
+              raw: fallbackRaw(item),
+              process: { stage: 'normalize', error: e.message || 'normalize failed', reason: 'invalid' }
+            });
+            results.push({ note_id: noteId, status: 'failed', reason: 'invalid', error: e.message || 'normalize failed' });
+          }
+          continue;
+        }
+
+        /* 新脚本浏览器内抓取失败：清单入箱标 failed 留待重扫重试；
+           服务端不代抓（登录墙后必败，徒增风控暴露与限速等待） */
+        if (item.fetch_error) {
+          const msg = `浏览器内详情抓取失败：${item.fetch_error}，重扫收藏夹自动重试`;
+          ctx.store.upsertInboxEntry({
+            note_id: noteId,
+            captured_at: new Date().toISOString(),
+            status: 'failed',
+            raw: fallbackRaw(item),
+            process: { stage: 'browser_fetch', error: msg, reason: 'browser_fetch' }
+          });
+          console.log(`[capture/list] 浏览器详情抓取失败${refeed ? '（重采）' : ''}: ${noteId} 《${(item && item.title) || ''}》`);
+          results.push({ note_id: noteId, status: 'failed', reason: 'browser_fetch', error: msg });
+          continue;
+        }
+
+        /* 老脚本（<0.5.0）兼容路径：服务端直抓（登录墙后基本必败，仅作升级过渡期兜底）。
+           限速：串行 + 随机抖动，规避风控（§5.1） */
         await sleep(1500 + Math.random() * 1500);
 
         let detail;
@@ -147,7 +207,7 @@ module.exports = function captureRoutes(ctx) {
         } catch (e) {
           detail = { ok: false, reason: 'network', message: '抓取异常: ' + (e.message || e) };
         }
-        /* 瞬时类失败自动补抓一次；token_expired 重试必败（旧 token），跳过 */
+        /* 瞬时类失败自动补抓一次；login_wall 重试必败（平台拒绝未登录会话），跳过 */
         if (!detail.ok && (detail.reason === 'network' || detail.reason === 'risk' || detail.reason.startsWith('http_'))) {
           await sleep(3000 + Math.random() * 2000);
           try {

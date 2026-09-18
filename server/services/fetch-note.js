@@ -5,9 +5,11 @@
  * 用 note_id + xsec_token 请求 explore 详情页，解析 window.__INITIAL_STATE__
  * 提取正文 desc / 视频字幕 / 图片列表。纯读模块、无本地状态。
  *
- * 带 xsec_token 的 explore 链接未登录也返回完整 __INITIAL_STATE__；
+ * 2026-09-18 实测：平台已对未登录会话的 explore 详情请求强制跳登录页（登录墙），
+ * 服务端直抓仅剩两个用途——老脚本（<0.5.0）兼容路径与溯源探测 link-status；
+ * 新采集走油猴 0.5.0+ 浏览器登录态内抓详情（ADR-006）。
  * 失败不再折叠为 null，而返回 {ok:false, reason, message}：
- * reason ∈ token_expired(302 登录页) / risk(风控) / network(超时断网) /
+ * reason ∈ login_wall(302 登录页) / risk(风控) / network(超时断网) /
  *          http_<status> / incomplete(内容缺失)，message 为可直接展示的中文原因。
  */
 
@@ -150,17 +152,6 @@ async function fetchText(url, timeoutMs = 15000) {
   }
 }
 
-/**
- * 抓取单条笔记详情。
- * @param {string} noteId
- * @param {string} xsecToken
- * @returns {Promise<{ok:true, note:object, subtitle:{text,lang}|null}
- *               | {ok:false, reason:string, message:string}>}
- *   ok 时 note 为 __INITIAL_STATE__ 原始 note（title/desc/user/interactInfo/imageList/
- *   video/tagList/time），可直接喂 normalizeCapture；
- *   失败 reason ∈ token_expired / risk / network / http_<status> / incomplete / invalid，
- *   message 为可直接写入收件箱展示的中文原因（含修复建议）。
- */
 /** 抓取+解析共享核（fetchNoteDetail / probeSource 共用同一套判定，避免复制粘贴）：
  *  成功 {ok:true, note}；失败 {ok:false, reason, message} */
 async function fetchNoteCore(noteId, xsecToken) {
@@ -176,8 +167,9 @@ async function fetchNoteCore(noteId, xsecToken) {
         : `详情页 HTTP ${page.reason.slice(5)} 错误，建议重扫收藏夹`;
     return bad(page.reason, msg);
   }
-  /* xsec_token 过期：302 到登录页，最终 URL 含 /login */
-  if (/\/login/i.test(page.url)) return bad('token_expired', 'xsec_token 已过期（跳转登录页），重扫收藏夹即可修复');
+  /* 平台登录墙：未登录会话访问 explore 详情被导向登录页（2026-09-18 实测收紧，
+     与 token 新鲜度无关——CDN 签名分钟级新 token 同样被拒，故不再误诊为 token_expired） */
+  if (/\/login/i.test(page.url)) return bad('login_wall', '小红书已对未登录的详情请求强制登录（登录墙），服务端直抓不可用；请将油猴脚本升级到 0.5.0+（浏览器内抓详情）后重扫收藏夹');
 
   const state = extractInitialState(page.text);
   if (!state) return bad('risk', '页面无 __INITIAL_STATE__（疑似风控验证页），稍后重扫收藏夹重试');
@@ -198,7 +190,7 @@ async function fetchNoteCore(noteId, xsecToken) {
  *               | {ok:false, reason:string, message:string}>}
  *   ok 时 note 为 __INITIAL_STATE__ 原始 note（title/desc/user/interactInfo/imageList/
  *   video/tagList/time），可直接喂 normalizeCapture；
- *   失败 reason ∈ token_expired / risk / network / http_<status> / incomplete / invalid，
+ *   失败 reason ∈ login_wall / risk / network / http_<status> / incomplete / invalid，
  *   message 为可直接写入收件箱展示的中文原因（含修复建议）。
  */
 async function fetchNoteDetail(noteId, xsecToken) {

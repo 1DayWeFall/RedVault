@@ -6,8 +6,12 @@
 $root = Split-Path -Parent $PSScriptRoot   # scripts\ 的上级 = 项目根
 $port = 3789
 $url  = "http://127.0.0.1:$port"
-$node = Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions\22.22.2-2\node.exe'
-if (-not (Test-Path $node)) { $node = 'node' }
+# node 定位：workbuddy 版本号会随更新变化（如 22.22.2-2 → 22.22.2-3），写死会失效；
+# 动态取 versions 下最新 node.exe，找不到再回退 PATH 的 node
+$node = $null
+$wbNode = Get-ChildItem (Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions') -Filter 'node.exe' -Recurse -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($wbNode) { $node = $wbNode.FullName } else { $node = 'node' }
 $log = Join-Path $root 'data\server.log'
 $err = Join-Path $root 'data\server.err.log'
 

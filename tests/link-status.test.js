@@ -61,16 +61,16 @@ test('404：未知笔记', async () => {
   assert.strictEqual((await hit('ghost')).status, 404);
 });
 
-test('expired：302 登录页；同键缓存命中不再触网', async () => {
+test('login_wall：302 登录页（ADR-006 改判，不再误诊 expired）；同键缓存命中不再触网', async () => {
   xhsRespond = () => ({ ok: true, status: 200, url: 'https://www.xiaohongshu.com/login', text: async () => '' });
   const r1 = await hit('n1');
   const j1 = await r1.json();
-  assert.strictEqual(j1.status, 'expired');
-  assert.match(j1.message, /过期/);
+  assert.strictEqual(j1.status, 'login_wall');
+  assert.match(j1.message, /登录墙/);
 
   const before = xhsCalls;
   const j2 = await (await hit('n1')).json();
-  assert.strictEqual(j2.status, 'expired');
+  assert.strictEqual(j2.status, 'login_wall');
   assert.strictEqual(j2.cached, true);
   assert.strictEqual(xhsCalls, before);        /* 缓存命中：未再触网 */
 });

@@ -583,6 +583,7 @@ const LINK_BADGE = {
   checking: { cls: "",      text: "检测中…" },
   alive:    { cls: "ok",    text: "链接有效" },
   expired:  { cls: "dead",  text: "链接已过期" },
+  login_wall: { cls: "none", text: "服务端不可测 · 浏览器可开" },
   deleted:  { cls: "dead",  text: "原帖可能已删除" },
   error:    { cls: "err",   text: "检测失败 · 点击重试" },
   no_token: { cls: "none",  text: "未带令牌" }

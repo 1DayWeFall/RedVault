@@ -126,7 +126,9 @@ window.__INITIAL_STATE__.noteData.noteDetailMap[noteId].note
 
 **上报**：`GM_xmlhttpRequest POST http://127.0.0.1:3789/api/capture`，header `X-Capture-Token`；响应 409（重复）时面板显示「已在收件箱/已入库」。
 
-**v0.4 演进（收藏夹清单模式，当前主路径）**：`@match` 放宽到 `xiaohongshu.com/*`，hook fetch/XHR 只读吸收收藏列表接口响应（`note_id + xsec_token` 清单），面板驱动自动滚动翻页抓全量；正文/字幕/图片改由服务端 `POST /capture/list` 凭 token 抓详情页完成（限速 1.5~3s 抖动），上报前 `POST /capture/check` 增量过滤。**溯源链接续期**：小红书 `xsec_token` 约数天过期（过期后点「溯源原帖」跳登录/扫码页），check 携带 token 识别 stale、list 对已入库笔记仅刷新 frontmatter `url` 一行——重扫一次收藏夹即可复活全部链接，正文与备注不动。
+**v0.4 演进（收藏夹清单模式 + 服务端两段式，已被 v0.5 取代为采集主路径）**：`@match` 放宽到 `xiaohongshu.com/*`，hook fetch/XHR 只读吸收收藏列表接口响应（`note_id + xsec_token` 清单），面板驱动自动滚动翻页抓全量；正文/字幕/图片改由服务端 `POST /capture/list` 凭 token 抓详情页完成（限速 1.5~3s 抖动），上报前 `POST /capture/check` 增量过滤。**溯源链接续期**：小红书 `xsec_token` 约数天过期（过期后点「溯源原帖」跳登录/扫码页），check 携带 token 识别 stale、list 对已入库笔记仅刷新 frontmatter `url` 一行——重扫一次收藏夹即可复活全部链接，正文与备注不动。
+
+**v0.5 演进（三段式·当前主路径，ADR-006）**：2026-09-18 平台对未登录会话的 explore 详情请求上登录墙（分钟级新 token 亦被拒，历史 `token_expired` 判定系误诊，改判 `login_wall`），服务端无 Cookie 直抓失效。详情抓取移回油猴浏览器登录态内完成（同源 fetch 带 Cookie，与真人点开笔记同构），字幕 SRT 原文随清单一并上报、服务端 `parseSrt` 单点清洗；`/capture/list` 条目带 `note` 直接入箱（服务端采集零外网），带 `fetch_error` 标 failed 留待重扫，老脚本（<0.5.0）兼容走服务端直抓过渡。
 
 **悬浮面板**（右下角，小红书红描边小卡片）：
 
@@ -288,7 +290,7 @@ archiver 将 vault 全部内容（.md + attachments）流式写入响应 `attach
 |------|------|------|----------------|
 | POST | `/capture` | 脚本上报（header `X-Capture-Token`） | `{...raw}` → `201 {note_id}` / `409 重复` / `401 token 错误` |
 | POST | `/capture/check` | 增量查询：上报前先问哪些需要报（判重口径同 /capture/list 单一事实源 `classifyNote`） | `{items:[{note_id,xsec_token}]}`（≤1000；旧 `{note_ids}` 兼容）→ `{fresh:[新+failed 重采], stale:[已入库但库内 token 过期], total, skipped}`；stale 并入上报以续期链接；旧服务端（只认 note_ids）→ 脚本自动降级全量 |
-| POST | `/capture/list` | 收藏夹清单批量上报：服务端逐条抓详情页（限速抖动、瞬时失败补抓一次）后入箱；failed 豁免判重重采；已入库笔记若清单 token 较新 → 仅刷新 frontmatter `url` 续期溯源链接（不动正文/备注） | `{notes:[{note_id,xsec_token,title,...}]}`（≤20/批）→ `201 {results:[{note_id, status: inbox\|failed\|duplicate\|refreshed\|invalid}]}` |
+| POST | `/capture/list` | 收藏夹清单批量上报（三段式，ADR-006）：油猴 0.5.0+ 条目带 `note`（浏览器登录态内抓的详情）+ `subtitle.srt`（原文）→ 服务端 parseSrt 清洗直接入箱，零外网零限速；带 `fetch_error` → failed(browser_fetch) 留待重扫；老脚本无两者 → 兼容服务端直抓（限速抖动、瞬时失败补抓一次，登录墙后基本必败）；failed 豁免判重重采；已入库笔记若清单 token 较新 → 仅刷新 frontmatter `url` 续期溯源链接（不动正文/备注） | `{notes:[{note_id,xsec_token,title,note?,subtitle?,fetch_error?}]}`（≤20/批，body ≤5mb）→ `201 {results:[{note_id, status: inbox\|failed\|duplicate\|refreshed\|invalid}]}` |
 | GET | `/inbox` | 收件箱列表（含 status/process） | → 条目数组（raw 裁剪 desc 至 200 字） |
 | GET | `/inbox/:id` | 完整预览 | → 单条完整 raw |
 | DELETE | `/inbox/:id` | 删除单条 | → `204` |
