@@ -6,7 +6,6 @@ RedVault 是一个本地优先的个人知识管理工具：在浏览器登录�
 
 [![Repository](https://img.shields.io/badge/GitHub-1DayWeFall%2FRedVault-181717?logo=github)](https://github.com/1DayWeFall/RedVault)
 [![License](https://img.shields.io/badge/license-personal%20project-lightgrey)](#项目边界)
-[![Runtime](https://img.shields.io/badge/runtime-Node.js%2018%2B-339933?logo=node.js)](#快速开始)
 
 ## 为什么做它
 
@@ -30,23 +29,23 @@ Markdown Vault + 索引
 
 ### 已实现的主路径
 
-- 油猴脚本在浏览器登录态内采集收藏详情、图片、视频字幕和评论
-- 原始内容先进入 Inbox，支持预览、确认、失败重试和处理状态查看
-- AI 双槽位整理：视觉模型优先，文本模型可回退；未配置 AI 时保存原文，不阻塞主流程
-- 生成 Obsidian 兼容 Markdown，保留 frontmatter、原帖正文和 AI 区块
+- 在浏览器登录状态下采集收藏详情、图片、视频字幕和评论
+- 原始内容先进入收件箱，支持预览、确认、失败重试和处理状态查看
+- AI 可以帮助提炼摘要、分类和标签；没有 AI 时仍然保存原文
+- 生成可被 Obsidian 等工具继续使用的本地笔记，并保留原始内容
 - 笔记库支持分类树、标签、关键词搜索、详情抽屉和备注编辑
 - 看板展示领域 → 分类 → 子分类 → 笔记的结构关系
 - 交互画布支持拖拽、平移、缩放、关键词/分类过滤和节点详情跳转
-- 主题合成、附件处理和 Obsidian ZIP 导出
 
-### 可信度与安全边界
+## 这个项目主要展示什么
 
-- 原帖正文不可变，AI 内容只写入独立锚点区块
-- 正文、评论、字幕、OCR 和附件在 prompt 中按来源区分，并明确作为外部数据处理
-- AI 整理失败、未整理和部分来源缺失会显示不同状态，不默认伪装成高质量知识
-- 服务只监听 `127.0.0.1:3789`，不对局域网开放
-- API key、采集 token、Inbox 和索引数据位于本地 `data/`，不会进入 Git
-- 测试只使用临时目录，严禁读写用户真实 Vault
+这不是一个为了展示技术栈而做的项目。它记录了我如何把一个日常困扰转化为产品：
+
+- 从“收藏之后很少回看”中提炼出真正的问题；
+- 先做收件箱、确认和本地保存，控制产品范围；
+- 用 Vibe Coding 快速把想法变成可以亲自使用的版本；
+- 根据使用中的不可信、难找回和失败场景继续调整设计；
+- 在需要复杂能力之前，先验证简单方案是否已经解决问题。
 
 ## 产品界面
 
@@ -66,24 +65,21 @@ Markdown Vault + 索引
 
 画布把分类层级和笔记节点放在同一张知识地图中，适合从整体结构浏览收藏，再进入单篇笔记阅读。
 
-## 技术方案
+## 如何落地
 
 ```text
-Tampermonkey userscript
-        │ HTTP + capture token
-        ▼
-Express API（127.0.0.1:3789）
-        ├── Inbox / capture / retry
-        ├── AI pipeline（vision / text / fallback）
-        ├── Vault engine（Markdown + anchored updates）
-        ├── Board aggregation（read-only）
-        └── Search / export / synthesis
-        │
-        ├── data/*.json          # 本地侧车状态，不入库
-        └── Obsidian Vault/*.md  # 唯一真实笔记源
+浏览器收藏
+    ↓
+收件箱确认
+    ↓
+AI 整理或原文保存
+    ↓
+本地 Markdown 笔记
+    ↓
+搜索、看板、画布和详情阅读
 ```
 
-技术取舍：采用原生 HTML/CSS/JavaScript 和本地 Node 服务，保持低部署成本、可审计的文件格式和 Markdown 数据可迁移性。
+我使用 AI 辅助完成代码实现和快速迭代，自己负责问题定义、功能取舍、使用验证和方向调整。最终数据以普通 Markdown 文件保存，方便继续使用 Obsidian 等工具。
 
 ## 快速开始
 
@@ -137,12 +133,9 @@ stop.cmd                Windows 停止入口
 
 当前版本已对核心主路径进行自动测试、API 检查和浏览器回归：
 
-- `npm test`：100 项通过；向量存储测试暂未启用
-- `/api/health`：服务健康检查
-- `/api/board`：节点、边、统计和异常数据结构测试
-- Inbox 失败项：恢复为 pending 的重试接口测试
-- 浏览器回归：画布加载、节点打开详情、关键词过滤、边同步变化、console 无新增错误
-- 安全回归：用户内容和 AI 内容进入 DOM 前统一经过 `esc()`
+- 自动测试：100 项通过，覆盖采集、整理、入库和失败恢复等核心流程
+- 画布测试：分类结构、异常数据、节点详情和关键词过滤已验证
+- 浏览器回归：画布加载、节点打开详情和筛选行为已验证
 
 ## 下一步
 
