@@ -180,6 +180,7 @@ stop.cmd                Windows 停止入口
 
 - [架构与设计约束](docs/DESIGN.md)
 - [架构决策记录](docs/ADR.md)
+- [项目案例记录与求职证据模板](docs/CASE_STUDY.md)
 - [项目状态总结](项目状态总结-2026-10-14.md)
 - [GitHub 仓库](https://github.com/1DayWeFall/RedVault)
 
