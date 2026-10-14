@@ -73,6 +73,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api', require('./routes/capture')(ctx));
 app.use('/api', require('./routes/inbox')(ctx));
 app.use('/api', require('./routes/notes')(ctx));
+app.use('/api', require('./routes/board')(ctx));
 app.use('/api', require('./routes/settings')(ctx));
 app.use('/api', require('./routes/synthesize')(ctx));
 app.use('/api', require('./routes/attachments')(ctx));

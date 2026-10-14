@@ -63,6 +63,24 @@ module.exports = function inboxRoutes(ctx) {
     } catch (e) { next(toHttpError(e)); }
   });
 
+  /* 失败项重试：只恢复状态，不重复写入 Vault；由 confirm 再次启动管线。 */
+  router.post('/inbox/retry', (req, res, next) => {
+    try {
+      const ids = req.body?.ids;
+      if (!Array.isArray(ids) || ids.length === 0 || ids.some((i) => typeof i !== 'string')) {
+        throw httpError(400, 'BAD_IDS', 'ids 须为非空字符串数组');
+      }
+      let retried = 0;
+      for (const id of ids) {
+        const entry = ctx.store.readInbox().find((x) => x.note_id === id && x.status === 'failed');
+        if (!entry) continue;
+        ctx.store.updateInboxEntry(id, { status: 'pending', process: null });
+        retried++;
+      }
+      res.json({ retried });
+    } catch (e) { next(toHttpError(e)); }
+  });
+
   router.get('/pipeline/status', (req, res) => {
     res.json(ctx.pipeline.status());
   });

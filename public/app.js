@@ -18,6 +18,7 @@ const COV = {
 /* ═══ 数据层：API 封装（demo 假数据已移除，NOTES/INBOX 由服务端加载） ═══ */
 let NOTES = [];   // mapNote(服务端 index) 视图模型缓存
 let INBOX = [];   // mapInbox(服务端 inbox)
+let BOARD = null;
 
 async function api(path, opts = {}) {
   const init = { headers: {} };
@@ -61,6 +62,7 @@ function mapNote(n) {
     published_at: (n.published_at || "").slice(0, 10), collected_at: (n.collected_at || "").slice(0, 10),
     liked: n.liked_count || 0, category: n.category || "", subcategory: n.subcategory || "",
     tags: n.tags || [], h: hOf(n.note_id), sources: n.sources || [],
+    quality_status: n.quality_status || (n.category === "未整理" ? "fallback_unprocessed" : "ai_processed"),
     thumb: coverUrl(n.cover),
     summary: "", key_points: [], ocr: [], comments: [], remark: "", attachments: [],
   };
@@ -356,6 +358,7 @@ function renderInbox() {
     e.stopPropagation();
     const id = b.closest(".inbox-card").dataset.id;
     if (b.dataset.act === "confirm") confirmItems([id]);
+    if (b.dataset.act === "retry") retryItems([id]);
     if (b.dataset.act === "del") {
       api("/inbox/" + id, { method: "DELETE" }).then(() => {
         const idx = INBOX.findIndex((x) => x.id === id);
@@ -388,6 +391,7 @@ function inboxCard(it, i) {
       <span style="color:var(--ink3);font-size:11px">${(r.comments || []).length} 条评论</span>
       <div class="mini-actions">
         ${it.status === "pending" ? `<button class="mini-btn ai" data-act="confirm">确认</button>` : ""}
+        ${it.status === "failed" ? `<button class="mini-btn ai" data-act="retry">重试</button>` : ""}
         <button class="mini-btn danger" data-act="del">删除</button>
       </div>
     </div>
@@ -407,6 +411,84 @@ function emptyInbox() {
     </div>
   </div>`;
 }
+/* ── 看板/交互画布（只读）：数据来自 index，不读取或写入 Vault ── */
+function readBoardViewport() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("redvault.board.viewport") || "{}");
+    return {
+      zoom: Number.isFinite(Number(saved.zoom)) ? Number(saved.zoom) : 1,
+      panX: Number.isFinite(Number(saved.panX)) ? Number(saved.panX) : 0,
+      panY: Number.isFinite(Number(saved.panY)) ? Number(saved.panY) : 0,
+    };
+  } catch (_) {
+    return { zoom: 1, panX: 0, panY: 0 };
+  }
+}
+function saveBoardViewport() {
+  try {
+    localStorage.setItem("redvault.board.viewport", JSON.stringify({ zoom: BOARD_VIEW.zoom, panX: BOARD_VIEW.panX, panY: BOARD_VIEW.panY }));
+  } catch (_) { /* private browsing or storage quota: viewport remains session-local */ }
+}
+const BOARD_VIEW = { q: "", category: "", ...readBoardViewport(), positions: new Map(), drag: null };
+
+async function renderBoard() {
+  let data;
+  try { data = await api("/board"); BOARD = data; }
+  catch (e) {
+    $("#content").innerHTML = `<div class="empty"><div class="empty-art">🗺</div><h3>看板暂时不可用</h3><p>${esc(e.message || "无法加载看板数据")}</p></div>`;
+    return;
+  }
+  const stats = data.stats || {}, all = data.nodes || [];
+  const categories = [...new Set(all.filter((n) => n.type === "domain").map((n) => n.label))].sort();
+  const q = BOARD_VIEW.q.trim().toLowerCase();
+  const visible = all.filter((n) => {
+    if (BOARD_VIEW.category && n.category !== BOARD_VIEW.category && n.label !== BOARD_VIEW.category) return false;
+    if (!q) return true;
+    return [n.label, n.category, n.subcategory, ...(n.tags || [])].join(" ").toLowerCase().includes(q);
+  });
+  const ids = new Set(visible.map((n) => n.id));
+  const edges = (data.edges || []).filter((e) => ids.has(e.from) && ids.has(e.to));
+  const levels = { domain: 0, subcategory: 1, note: 2 }, byLevel = [[], [], []];
+  visible.forEach((n) => byLevel[levels[n.type] ?? 2].push(n));
+  const pos = new Map();
+  byLevel.forEach((items, level) => items.forEach((n, i) => {
+    const old = BOARD_VIEW.positions.get(n.id);
+    pos.set(n.id, old || { x: 150 + level * 285, y: 90 + i * 82 });
+  }));
+  BOARD_VIEW.positions = pos;
+  const width = 1000, height = Math.max(460, 150 + Math.max(...byLevel.map((x) => x.length), 1) * 82);
+  const point = (id) => pos.get(id) || { x: 0, y: 0 };
+  const edgeHtml = edges.map((e) => { const a = point(e.from), b = point(e.to); return `<line class="board-edge" data-from="${esc(e.from)}" data-to="${esc(e.to)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" />`; }).join("");
+  const nodeHtml = visible.map((n) => {
+    const p = point(n.id), note = n.type === "note";
+    const label = n.label.length > (note ? 18 : 12) ? n.label.slice(0, note ? 18 : 12) + "…" : n.label;
+    return `<g class="board-node board-node--${esc(n.type)}${n.quality === "unprocessed" ? " board-node--unprocessed" : ""}" data-node-id="${esc(n.id)}" data-note-id="${note ? esc(n.note_id) : ""}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.label)}"><rect x="-104" y="-24" width="208" height="48" rx="12"></rect><text class="board-node-label" text-anchor="middle" y="5">${esc(label)}</text>${note && n.tags?.length ? `<text class="board-node-meta" text-anchor="middle" y="19">${esc(n.tags.slice(0, 2).join(" · "))}</text>` : ""}</g>`;
+  }).join("");
+  $("#content").innerHTML = `<div class="view-head board-head"><div><div class="view-title">知识看板</div><div class="view-sub">用画布理解你的收藏如何组织成知识结构</div></div><div class="board-stats"><span><b>${stats.notes || 0}</b> 篇笔记</span><span><b>${stats.domains || 0}</b> 个领域</span><span class="board-warn"><b>${(stats.pending || 0) + (stats.failed || 0)}</b> 条待处理</span></div></div><div class="board-toolbar"><input id="boardQuery" value="${esc(BOARD_VIEW.q)}" placeholder="筛选标题、分类或标签…"><div class="board-filters"><button class="board-filter${!BOARD_VIEW.category ? " active" : ""}" data-board-cat="">全部</button>${categories.map((c) => `<button class="board-filter${BOARD_VIEW.category === c ? " active" : ""}" data-board-cat="${esc(c)}">${esc(c)}</button>`).join("")}</div><button class="btn btn-ghost" id="boardReset">重置视图</button></div><div class="board-canvas" id="boardCanvas"><div class="board-empty" ${visible.length ? "hidden" : ""}>没有匹配的笔记</div><svg id="boardSvg" viewBox="0 0 ${width} ${height}" aria-label="知识结构画布"><g id="boardWorld" transform="translate(${BOARD_VIEW.panX},${BOARD_VIEW.panY}) scale(${BOARD_VIEW.zoom})">${edgeHtml}${nodeHtml}</g></svg><div class="board-legend"><span><i class="legend-dot domain"></i>领域</span><span><i class="legend-dot subcategory"></i>子分类</span><span><i class="legend-dot note"></i>笔记</span></div></div>`;
+  bindBoardEvents();
+}
+
+function bindBoardEvents() {
+  const canvas = $("#boardCanvas"), world = $("#boardWorld");
+  if (!canvas || !world) return;
+  const redrawWorld = () => world.setAttribute("transform", `translate(${BOARD_VIEW.panX},${BOARD_VIEW.panY}) scale(${BOARD_VIEW.zoom})`);
+  $("#boardQuery").oninput = (e) => { BOARD_VIEW.q = e.target.value; renderBoard(); };
+  $$("[data-board-cat]").forEach((b) => b.onclick = () => { BOARD_VIEW.category = b.dataset.boardCat; renderBoard(); });
+  $("#boardReset").onclick = () => { BOARD_VIEW.zoom = 1; BOARD_VIEW.panX = 0; BOARD_VIEW.panY = 0; BOARD_VIEW.positions.clear(); saveBoardViewport(); renderBoard(); };
+  $$(".board-node[data-note-id]").forEach((node) => {
+    node.onpointerdown = (e) => { e.stopPropagation(); node.setPointerCapture(e.pointerId); const id = node.dataset.nodeId, p = BOARD_VIEW.positions.get(id); BOARD_VIEW.drag = { id, startX: e.clientX, startY: e.clientY, x: p.x, y: p.y, moved: false }; };
+    node.onpointermove = (e) => { const d = BOARD_VIEW.drag; if (!d || d.id !== node.dataset.nodeId) return; const dx = (e.clientX - d.startX) / BOARD_VIEW.zoom, dy = (e.clientY - d.startY) / BOARD_VIEW.zoom; if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true; const p = BOARD_VIEW.positions.get(d.id); p.x = d.x + dx; p.y = d.y + dy; node.setAttribute("transform", `translate(${p.x},${p.y})`); $$(".board-edge").forEach((line) => { const a = BOARD_VIEW.positions.get(line.dataset.from), b = BOARD_VIEW.positions.get(line.dataset.to); if (a && b) { line.setAttribute("x1", a.x); line.setAttribute("y1", a.y); line.setAttribute("x2", b.x); line.setAttribute("y2", b.y); } }); };
+    node.onpointerup = (e) => { const d = BOARD_VIEW.drag; BOARD_VIEW.drag = null; if (!d?.moved) openDetail(node.dataset.noteId); node.releasePointerCapture?.(e.pointerId); };
+    node.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") openDetail(node.dataset.noteId); };
+  });
+  let pan = null;
+  canvas.onpointerdown = (e) => { if (e.target.closest(".board-node")) return; pan = { x: e.clientX, y: e.clientY, px: BOARD_VIEW.panX, py: BOARD_VIEW.panY }; canvas.setPointerCapture(e.pointerId); };
+  canvas.onpointermove = (e) => { if (!pan) return; BOARD_VIEW.panX = pan.px + e.clientX - pan.x; BOARD_VIEW.panY = pan.py + e.clientY - pan.y; redrawWorld(); };
+  canvas.onpointerup = () => { if (pan) saveBoardViewport(); pan = null; };
+  canvas.onpointercancel = () => { if (pan) saveBoardViewport(); pan = null; };
+  canvas.onwheel = (e) => { e.preventDefault(); BOARD_VIEW.zoom = Math.max(.55, Math.min(2.2, BOARD_VIEW.zoom * (e.deltaY > 0 ? .92 : 1.08))); saveBoardViewport(); redrawWorld(); };
+}
+
 /* ── 详情抽屉（按需拉取 vault 全文，合并进视图模型） ── */
 async function openDetail(id) {
   const n = NOTES.find((x) => x.id === id);
@@ -437,12 +519,14 @@ async function openDetail(id) {
     } catch (e) { toast(e.message || "详情加载失败", "err"); }
   }
   const isSyn = n.type === "synthesis";
+  const qualityLabel = n.quality_status === "fallback_unprocessed" ? "原文已保存 · 尚未 AI 整理" : n.quality_status === "partial" ? "AI 整理 · 部分来源不完整" : "AI 整理";
+  const qualityClass = n.quality_status === "fallback_unprocessed" ? "quality-badge quality-badge--warn" : "quality-badge";
   const rel = isSyn ? [] : relateOf(n);
   const srcs = isSyn ? (n.sources || []).map((sid) => NOTES.find((x) => x.id === sid)).filter(Boolean) : [];
 
   $("#drawerDetail").innerHTML = `
     <div class="drawer-topbar">
-      <span class="crumb">${isSyn ? "AI 合成笔记" : esc(n.category) + " / " + esc(n.subcategory)}</span>
+      <span class="crumb">${isSyn ? "AI 合成笔记" : esc(n.category) + " / " + esc(n.subcategory)}</span><span class="${qualityClass}">${qualityLabel}</span>
       <span class="spacer"></span>
       <button class="mini-btn" id="btnReprocess" title="重跑 AI 打标与排版">↺ 重新打标</button>
       <button class="mini-btn danger" id="btnDelNote">删除</button>
@@ -736,6 +820,17 @@ async function confirmItems(ids) {
   } catch (e) {
     toast(e.message || "提交失败", "err");
   }
+}
+
+async function retryItems(ids) {
+  const failed = INBOX.filter((x) => ids.includes(x.id) && x.status === "failed");
+  if (!failed.length) return;
+  try {
+    await api("/inbox/retry", { method: "POST", body: { ids: failed.map((x) => x.id) } });
+    failed.forEach((x) => { x.status = "pending"; x.process = null; });
+    renderInbox();
+    toast(`已将 ${failed.length} 条失败项放回待处理`, "info");
+  } catch (e) { toast(e.message || "重试失败", "err"); }
 }
 
 const PIPE = { timer: null, expected: 0 };
@@ -1108,7 +1203,7 @@ async function openUserscript() {
 function route() {
   const h = location.hash || "#/library";
   const [path, qs] = h.slice(2).split("?");
-  App.view = path === "inbox" ? "inbox" : "library";
+  App.view = path === "inbox" ? "inbox" : path === "board" ? "board" : "library";
   /* 切视图清空多选状态，避免两个视图选择集互相污染 */
   if (App.selectMode) { App.selectMode = false; App.selected.clear(); updateSelectBar(); }
   $$("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === App.view));
@@ -1121,7 +1216,8 @@ function route() {
       App.filter.type = p.get("type") || "";
     }
     renderLibrary();
-  } else renderInbox();
+  } else if (App.view === "board") renderBoard();
+  else renderInbox();
   renderSidebar();
 }
 

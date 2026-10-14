@@ -1,64 +1,6 @@
 @echo off
-REM ============================================================
-REM RedVault one-click start
-REM Usage: run  start.cmd  (or double-click) in project root
-REM Only entry: http://127.0.0.1:3789  (8923 is deprecated)
-REM ============================================================
-setlocal EnableDelayedExpansion
-
-cd /d "%~dp0"
-set "PORT=3789"
-set "URL=http://127.0.0.1:%PORT%"
-
-REM ---- locate node ----
-set "NODE="
-where node >nul 2>&1 && set "NODE=node"
-if not defined NODE (
-  REM workbuddy 版本号会变（22.22.2-2 → 22.22.2-3），遍历 versions 取最新，不写死
-  for /d %%d in ("%USERPROFILE%\.workbuddy\binaries\node\versions\*") do (
-    if exist "%%d\node.exe" set "NODE=%%d\node.exe"
-  )
-)
-if not defined NODE (
-  echo [error] node not found. Please install Node.js 18+.
-  exit /b 1
-)
-
-REM ---- clean old listeners on 3789 and deprecated 8923 ----
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":3789 .*LISTENING"') do (
-  echo [clean] killing old process on 3789 ^(PID %%p^)
-  taskkill /F /PID %%p >nul 2>&1
-)
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":8923 .*LISTENING"') do (
-  echo [clean] killing deprecated process on 8923 ^(PID %%p^)
-  taskkill /F /PID %%p >nul 2>&1
-)
-REM wait for ports to be fully released before starting
-timeout /t 2 /nobreak >nul
-
-REM ---- start service in a detached minimized window ----
-REM (no /b: service gets its own console so it survives this window closing)
-echo [..] starting RedVault (%NODE% server/index.js) ...
-start "RedVault-server" /min "%NODE%" server\index.js
-
-REM ---- wait and probe health ----
-set "ok=0"
-for /l %%i in (1,1,15) do (
-  timeout /t 1 /nobreak >nul
-  powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri '%URL%/api/health' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>&1
-  if !errorlevel! equ 0 ( set "ok=1" & goto :ready )
-)
-
-:ready
-if "!ok!"=="1" (
-  echo.
-  start "" "%URL%"
-  echo [OK] RedVault started. Opening %URL% in your browser...
-  echo      Entry: %URL%
-  echo      Service runs in the minimized window titled "RedVault-server".
-  echo      Close that window to stop the service. This window can be closed.
-) else (
-  echo [error] service failed to start. Check server/index.js or port conflicts.
-)
-endlocal
-pause
+REM RedVault hidden launcher. PowerShell starts the Node child without a console window.
+set "REDVAULT_ROOT=%~dp0"
+start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$root=[IO.Path]::GetFullPath($env:REDVAULT_ROOT); $url='http://127.0.0.1:3789'; $pids=netstat -ano | Select-String ':3789\s+.*LISTENING' | ForEach-Object { ($_ -split '\s+')[-1] } | Where-Object { $_ -match '^\d+$' } | Select-Object -Unique; foreach($p in $pids){Stop-Process -Id $p -Force -ErrorAction SilentlyContinue}; $node=(Get-Command node.exe -ErrorAction SilentlyContinue).Source; if(-not $node){$nr=Join-Path $env:USERPROFILE '.workbuddy\binaries\node\versions'; $node=Get-ChildItem $nr -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object {Join-Path $_.FullName 'node.exe'} | Where-Object {Test-Path $_} | Select-Object -First 1}; if(-not $node){throw '未找到 Node.js 18+'}; Start-Process -FilePath $node -ArgumentList 'server/index.js' -WorkingDirectory $root -WindowStyle Hidden; for($i=0;$i -lt 15;$i++){Start-Sleep 1; try{$r=Invoke-WebRequest ($url+'/api/health') -UseBasicParsing -TimeoutSec 2;if($r.StatusCode -eq 200){Start-Process $url;break}}catch{}}"
+set "REDVAULT_ROOT="
+exit /b 0

@@ -67,3 +67,16 @@ test('store.removeInboxEntries：空命中返回 0 且不写盘', async (t) => {
   assert.strictEqual(ctx.store.removeInboxEntries(['ghost']), 0);
   assert.strictEqual(ctx.store.readInbox().length, 1);
 });
+
+test('POST /inbox/retry：失败项恢复 pending，非失败项保持不变', async (t) => {
+  const ctx = setup([mk('f1', 'failed'), mk('p1', 'pending'), mk('d1', 'done')]);
+  t.after(cleanup(ctx));
+  const r = await fetch(ctx.base + '/inbox/retry', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ['f1', 'p1', 'ghost'] })
+  });
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual(await r.json(), { retried: 1 });
+  assert.strictEqual(ctx.store.readInbox().find((x) => x.note_id === 'f1').status, 'pending');
+  assert.strictEqual(ctx.store.readInbox().find((x) => x.note_id === 'p1').status, 'pending');
+  assert.strictEqual(ctx.store.readInbox().find((x) => x.note_id === 'd1').status, 'done');
+});
